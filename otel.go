@@ -50,13 +50,14 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 
 	spanKind := tr.ValidateSpanKind(span.SpanKind()).String()
 	event := &CLEFEvent{
-		Timestamp:  span.EndTime(),
-		Message:    span.Name(),
-		TraceID:    sc.TraceID().String(),
-		SpanID:     sc.SpanID().String(),
-		SpanStart:  span.StartTime(),
-		SpanKind:   spanKind,
-		Properties: map[string]any{"SpanName": span.Name()},
+		Timestamp:          span.EndTime(),
+		Message:            span.Name(),
+		TraceID:            sc.TraceID().String(),
+		SpanID:             sc.SpanID().String(),
+		SpanStart:          span.StartTime(),
+		SpanKind:           spanKind,
+		ResourceAttributes: resourceAttrs(span),
+		Properties:         map[string]any{"SpanName": span.Name()},
 	}
 
 	if parent := span.Parent(); parent.IsValid() {
@@ -88,13 +89,14 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 
 	spanKind := tr.ValidateSpanKind(span.SpanKind()).String()
 	event := &CLEFEvent{
-		Timestamp:  e.Time,
-		Message:    e.Name,
-		TraceID:    sc.TraceID().String(),
-		SpanID:     sc.SpanID().String(),
-		SpanStart:  span.StartTime(),
-		SpanKind:   spanKind,
-		Properties: map[string]any{"SpanName": span.Name()},
+		Timestamp:          e.Time,
+		Message:            e.Name,
+		TraceID:            sc.TraceID().String(),
+		SpanID:             sc.SpanID().String(),
+		SpanStart:          span.StartTime(),
+		SpanKind:           spanKind,
+		ResourceAttributes: resourceAttrs(span),
+		Properties:         map[string]any{"SpanName": span.Name()},
 	}
 
 	if parent := span.Parent(); parent.IsValid() {
@@ -112,4 +114,20 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	}
 
 	p.Handler.HandleCLEFEvent(*event)
+}
+
+// resourceAttrs flattens the span's OTel Resource into a map suitable for
+// CLEF's @ra field. Returns nil when the resource is empty so the field is
+// omitted from the JSON output.
+func resourceAttrs(span trace.ReadOnlySpan) map[string]any {
+	res := span.Resource()
+	if res == nil || res.Len() == 0 {
+		return nil
+	}
+	attrs := res.Attributes()
+	out := make(map[string]any, len(attrs))
+	for _, kv := range attrs {
+		out[string(kv.Key)] = kv.Value.AsInterface()
+	}
+	return out
 }
