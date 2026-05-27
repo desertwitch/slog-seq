@@ -3,6 +3,7 @@ package slogseq
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/trace"
 	tr "go.opentelemetry.io/otel/trace"
 )
@@ -20,6 +21,7 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	for _, e := range events {
 		p.logOtelEventAsCLEF(s, e)
 	}
+	p.logOtelSpanAsCLEF(s)
 }
 
 func (p *LoggingSpanProcessor) ForceFlush(ctx context.Context) error {
@@ -35,8 +37,48 @@ func (p *LoggingSpanProcessor) ExportSpans(ctx context.Context, spans []trace.Re
 		for _, e := range s.Events() {
 			p.logOtelEventAsCLEF(s, e)
 		}
+		p.logOtelSpanAsCLEF(s)
 	}
 	return nil
+}
+
+func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
+	sc := span.SpanContext()
+	if !sc.IsValid() {
+		return
+	}
+
+	spanKind := tr.ValidateSpanKind(span.SpanKind()).String()
+	event := &CLEFEvent{
+		Timestamp:          span.EndTime(),
+		Message:            span.Name(),
+		TraceID:            sc.TraceID().String(),
+		SpanID:             sc.SpanID().String(),
+		SpanStart:          span.StartTime(),
+		SpanKind:           spanKind,
+		ResourceAttributes: resourceAttrs(span),
+		Properties:         map[string]any{"SpanName": span.Name()},
+	}
+
+	if parent := span.Parent(); parent.IsValid() {
+		event.ParentSpanID = parent.SpanID().String()
+	}
+
+	// Include span attributes as properties
+	for _, attr := range span.Attributes() {
+		event.Properties[string(attr.Key)] = attr.Value.AsInterface()
+	}
+
+	// Set level based on span status
+	status := span.Status()
+	if status.Code == codes.Error {
+		event.Level = CLEFLevelError.String()
+		if status.Description != "" {
+			event.Message = status.Description
+		}
+	}
+
+	p.Handler.HandleCLEFEvent(*event)
 }
 
 func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e trace.Event) {
@@ -53,8 +95,8 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		SpanID:             sc.SpanID().String(),
 		SpanStart:          span.StartTime(),
 		SpanKind:           spanKind,
-		ResourceAttributes: map[string]any{"service": map[string]any{"name": span.Name()}},
-		Properties:         make(map[string]any),
+		ResourceAttributes: resourceAttrs(span),
+		Properties:         map[string]any{"SpanName": span.Name()},
 	}
 
 	if parent := span.Parent(); parent.IsValid() {
@@ -72,4 +114,20 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	}
 
 	p.Handler.HandleCLEFEvent(*event)
+}
+
+// resourceAttrs flattens the span's OTel Resource into a map suitable for
+// CLEF's @ra field. Returns nil when the resource is empty so the field is
+// omitted from the JSON output.
+func resourceAttrs(span trace.ReadOnlySpan) map[string]any {
+	res := span.Resource()
+	if res == nil || res.Len() == 0 {
+		return nil
+	}
+	attrs := res.Attributes()
+	out := make(map[string]any, len(attrs))
+	for _, kv := range attrs {
+		out[string(kv.Key)] = kv.Value.AsInterface()
+	}
+	return out
 }

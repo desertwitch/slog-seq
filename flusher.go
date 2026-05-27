@@ -101,7 +101,7 @@ func encodeEvent(e CLEFEvent) map[string]any {
 		topLevel["@ps"] = e.ParentSpanID
 	}
 	if len(e.ResourceAttributes) > 0 {
-		topLevel["@ra"] = e.ResourceAttributes
+		topLevel["@ra"] = dottedToNested(e.ResourceAttributes)
 	}
 	if e.SpanKind != "" {
 		topLevel["@sk"] = e.SpanKind

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -52,5 +53,46 @@ func TestOnEnd_WithException(t *testing.T) {
 		t.Errorf("expected property 'code' to be set")
 	} else if code.(int64) != 500 {
 		t.Errorf("expected code 500, got %v", code)
+	}
+}
+
+func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
+	handler := &SeqHandler{noFlush: true, workerCount: 1}
+	handler.start()
+	processor := &LoggingSpanProcessor{Handler: handler}
+
+	res := resource.NewSchemaless(
+		attribute.String("service.name", "testsvc"),
+		attribute.String("service.version", "1.2.3"),
+	)
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(processor),
+		sdktrace.WithResource(res),
+	)
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+
+	tracer := tp.Tracer("test-tracer")
+	_, span := tracer.Start(context.Background(), "rootSpan")
+	span.AddEvent("anEvent")
+	span.End()
+
+	// One event emitted from AddEvent, one from span end.
+	var events []CLEFEvent
+	for i := 0; i < 2; i++ {
+		select {
+		case e := <-handler.workers[0].eventsCh:
+			events = append(events, e)
+		case <-time.After(1000 * time.Millisecond):
+			t.Fatalf("timed out waiting for event %d", i)
+		}
+	}
+
+	for _, evt := range events {
+		if evt.ResourceAttributes["service.name"] != "testsvc" {
+			t.Errorf("expected @ra service.name=testsvc, got %v", evt.ResourceAttributes["service.name"])
+		}
+		if evt.ResourceAttributes["service.version"] != "1.2.3" {
+			t.Errorf("expected @ra service.version=1.2.3, got %v", evt.ResourceAttributes["service.version"])
+		}
 	}
 }
