@@ -18,6 +18,7 @@ const (
 	idleConnTimeout       = 90 * time.Second
 	tlsHandShakeTimeout   = 10 * time.Second
 	expectContinueTimeout = 10 * time.Second
+	requestTimeout        = 30 * time.Second
 )
 
 func (h *SeqHandler) runBackgroundFlusher(w *worker) {
@@ -215,5 +216,6 @@ func newHTTPClient(skipVerify bool) *http.Client {
 			TLSHandshakeTimeout:   tlsHandShakeTimeout,
 			ExpectContinueTimeout: expectContinueTimeout,
 		},
+		Timeout: requestTimeout,
 	}
 }
