@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +27,13 @@ type worker struct {
 	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent
 	purgeTicker *time.Ticker
+}
+
+// groupOrAttrs holds either a group name or a list of slog.Attrs.
+// This preserves the ordering of WithGroup and WithAttrs calls.
+type groupOrAttrs struct {
+	group string      // group name if non-empty
+	attrs []slog.Attr // attrs if non-empty
 }
 
 type shared struct {
@@ -61,8 +67,7 @@ type shared struct {
 type SeqHandler struct {
 	*shared
 
-	attrs     []slog.Attr
-	groups    []string
+	goas      []groupOrAttrs
 	options   slog.HandlerOptions
 	sourceKey string
 }
@@ -73,7 +78,6 @@ func newSeqHandler(seqURL string) *SeqHandler {
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
 
-			// sane defaults
 			batchSize:     defaultBatchSize,
 			flushInterval: defaultFlushInterval,
 			workerCount:   defaultWorkerCount,
@@ -118,26 +122,50 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Collect attributes into a map
 	props := make(map[string]any)
 
+	// Determine all active groups for source/ReplaceAttr context
+	groups := h.activeGroups()
+
+	// Process WithGroup/WithAttrs in order
+	for _, goa := range h.goas {
+		if goa.group != "" {
+			continue // groups are handled via key prefixing
+		}
+		for _, a := range goa.attrs {
+			if h.options.ReplaceAttr != nil {
+				a = h.options.ReplaceAttr(groups, a)
+				if a.Key == "" {
+					continue
+				}
+			}
+
+			if v, ok := a.Value.Any().(error); ok {
+				a.Value = slog.StringValue(v.Error())
+			}
+
+			h.addAttr(props, a)
+		}
+	}
+
+	// Process record attrs under all active groups
+	r.Attrs(func(a slog.Attr) bool {
+		if a, ok := h.resolveAttr(groups, a); ok {
+			h.addAttr(props, a)
+		}
+
+		return true
+	})
+
+	// Process source last so it overwrites user-provided keys with reserved names.
 	if h.options.AddSource {
 		pc := r.PC
 		caller := runtime.CallersFrames([]uintptr{pc})
 		frame, _ := caller.Next()
 		source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
 
-		if a, ok := h.resolveAttr(slog.Any(h.sourceKey, &source)); ok {
+		if a, ok := h.resolveAttr(groups, slog.Any(h.sourceKey, &source)); ok {
 			h.addAttr(props, a)
 		}
 	}
-
-	h.addAttrs(props, h.attrs)
-
-	r.Attrs(func(a slog.Attr) bool {
-		if a, ok := h.resolveAttr(a); ok {
-			h.addAttr(props, a)
-		}
-
-		return true
-	})
 
 	// split multi-line messages into a message (first line) and 'exception' (rest)
 	msg := strings.SplitN(r.Message, "\n", 2) //nolint:mnd
@@ -205,26 +233,31 @@ func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 }
 
 func (h *SeqHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	h2 := *h
-	h2.attrs = slices.Clone(h.attrs)
+	if len(attrs) == 0 {
+		return h
+	}
+
+	// Resolve and prefix attrs with current groups
+	groups := h.activeGroups()
+	resolved := make([]slog.Attr, 0, len(attrs))
 
 	for _, a := range attrs {
 		a.Value = a.Value.Resolve()
 
 		if a.Key == "" {
-			h2.attrs = append(h2.attrs, a)
+			resolved = append(resolved, a)
 
 			continue
 		}
 
-		if len(h2.groups) > 0 && a.Key != h2.sourceKey {
-			a.Key = strings.Join(h2.groups, ".") + "." + a.Key
+		if len(groups) > 0 && a.Key != h.sourceKey {
+			a.Key = strings.Join(groups, ".") + "." + a.Key
 		}
 
-		h2.attrs = append(h2.attrs, a)
+		resolved = append(resolved, a)
 	}
 
-	return &h2
+	return h.withGroupOrAttrs(groupOrAttrs{attrs: resolved})
 }
 
 func (h *SeqHandler) WithGroup(name string) slog.Handler {
@@ -232,11 +265,7 @@ func (h *SeqHandler) WithGroup(name string) slog.Handler {
 		return h // no-op
 	}
 
-	h2 := *h
-	h2.groups = slices.Clone(h.groups)
-	h2.groups = append(h2.groups, name)
-
-	return &h2
+	return h.withGroupOrAttrs(groupOrAttrs{group: name})
 }
 
 func (h *SeqHandler) Close() error {
@@ -267,16 +296,38 @@ func (h *SeqHandler) SourceKey() string {
 	return h.sourceKey
 }
 
-func (h *SeqHandler) resolveAttr(a slog.Attr) (slog.Attr, bool) {
+func (h *SeqHandler) withGroupOrAttrs(goa groupOrAttrs) *SeqHandler {
+	h2 := *h
+	h2.goas = make([]groupOrAttrs, len(h.goas)+1)
+	copy(h2.goas, h.goas)
+	h2.goas[len(h2.goas)-1] = goa
+
+	return &h2
+}
+
+// activeGroups returns the group names currently in effect,
+// collected from the goas slice.
+func (h *SeqHandler) activeGroups() []string {
+	var groups []string
+	for _, goa := range h.goas {
+		if goa.group != "" {
+			groups = append(groups, goa.group)
+		}
+	}
+
+	return groups
+}
+
+func (h *SeqHandler) resolveAttr(groups []string, a slog.Attr) (slog.Attr, bool) {
 	if h.options.ReplaceAttr != nil {
-		a = h.options.ReplaceAttr(h.groups, a)
+		a = h.options.ReplaceAttr(groups, a)
 		if a.Key == "" {
 			return a, false
 		}
 	}
 
-	if len(h.groups) > 0 && a.Key != h.sourceKey {
-		a.Key = strings.Join(h.groups, ".") + "." + a.Key
+	if len(groups) > 0 && a.Key != h.sourceKey {
+		a.Key = strings.Join(groups, ".") + "." + a.Key
 	}
 
 	if v, ok := a.Value.Any().(error); ok {
@@ -284,12 +335,6 @@ func (h *SeqHandler) resolveAttr(a slog.Attr) (slog.Attr, bool) {
 	}
 
 	return a, true
-}
-
-func (h *SeqHandler) addAttrs(dst map[string]any, attrs []slog.Attr) {
-	for _, a := range attrs {
-		h.addAttr(dst, a)
-	}
 }
 
 func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
