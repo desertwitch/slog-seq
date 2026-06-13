@@ -2,6 +2,7 @@ package slogseq
 
 import (
 	"context"
+	"fmt"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -18,9 +19,11 @@ func (p *LoggingSpanProcessor) OnStart(ctx context.Context, s trace.ReadWriteSpa
 
 func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	events := s.Events()
+
 	for _, e := range events {
 		p.logOtelEventAsCLEF(s, e)
 	}
+
 	p.logOtelSpanAsCLEF(s)
 }
 
@@ -37,8 +40,10 @@ func (p *LoggingSpanProcessor) ExportSpans(ctx context.Context, spans []trace.Re
 		for _, e := range s.Events() {
 			p.logOtelEventAsCLEF(s, e)
 		}
+
 		p.logOtelSpanAsCLEF(s)
 	}
+
 	return nil
 }
 
@@ -109,7 +114,7 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		event.Properties[k] = v
 		if k == "exception.message" {
 			event.Level = CLEFLevelError.String()
-			event.Message = v.(string)
+			event.Message = fmt.Sprint(v)
 		}
 	}
 
@@ -124,10 +129,12 @@ func resourceAttrs(span trace.ReadOnlySpan) map[string]any {
 	if res == nil || res.Len() == 0 {
 		return nil
 	}
+
 	attrs := res.Attributes()
 	out := make(map[string]any, len(attrs))
 	for _, kv := range attrs {
 		out[string(kv.Key)] = kv.Value.AsInterface()
 	}
+
 	return out
 }
