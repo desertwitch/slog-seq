@@ -1,7 +1,19 @@
-[![Go Reference](https://pkg.go.dev/badge/github.com/sokkalf/slog-seq.svg)](https://pkg.go.dev/github.com/sokkalf/slog-seq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sokkalf/slog-seq)](https://goreportcard.com/report/github.com/sokkalf/slog-seq)
-![CI tests](https://github.com/sokkalf/slog-seq/actions/workflows/tests.yml/badge.svg)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+>[!NOTE]
+> This is a fork of `sokkalf/slog-seq` with my personal [patches](https://github.com/sokkalf/slog-seq/compare/master...desertwitch:slog-seq:master).  
+> Feel free to use it, or the upstream, whichever suits your needs best.  
+> At the time of writing this fork is drop-in compatible with the upstream.
+
+<div>
+    <a href="https://github.com/desertwitch/slog-seq/tags"><img alt="Release" src="https://img.shields.io/github/tag/desertwitch/slog-seq.svg"></a>
+    <a href="https://go.dev/"><img alt="Go Version" src="https://img.shields.io/badge/Go-%3E%3D%201.24.0-%23007d9c"></a>
+    <a href="https://pkg.go.dev/github.com/desertwitch/slog-seq"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/desertwitch/slog-seq.svg"></a>
+    <a href="https://goreportcard.com/report/github.com/desertwitch/slog-seq"><img alt="Go Report" src="https://goreportcard.com/badge/github.com/desertwitch/slog-seq"></a>
+    <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/desertwitch/slog-seq"></a>
+    <br>
+    <a href="https://app.codecov.io/gh/desertwitch/slog-seq"><img alt="Codecov" src="https://codecov.io/github/desertwitch/slog-seq/graph/badge.svg?token=SLUM5DRVHR"></a>
+    <a href="https://github.com/desertwitch/slog-seq/actions/workflows/golangci-lint.yml"><img alt="Lint" src="https://github.com/desertwitch/slog-seq/actions/workflows/golangci-lint.yml/badge.svg"></a>
+    <a href="https://github.com/desertwitch/slog-seq/actions/workflows/golang-tests.yml"><img alt="Tests" src="https://github.com/desertwitch/slog-seq/actions/workflows/golang-tests.yml/badge.svg"></a>
+</div>
 
 # slog-seq
 
@@ -12,7 +24,7 @@ It also supports some trace functionality.
 ## Installation
 
 ```bash
-go get github.com/sokkalf/slog-seq
+go get github.com/desertwitch/slog-seq
 ```
 
 ## Quick start
@@ -94,7 +106,7 @@ slog.InfoContext(spanCtx, "All done!")
 span.End()
 ```
 
-![Seq with traces](../master/doc/seq_screenshot.png)
+![Seq with traces](./doc/seq_screenshot.png)
 
 ## License
 

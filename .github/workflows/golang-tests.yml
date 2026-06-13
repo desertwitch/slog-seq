@@ -1,0 +1,23 @@
+name: golang-tests
+on:
+  push:
+    branches:
+      - master
+      - main
+      - devel
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  golang:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - name: Run all Go tests
+        run: make test
