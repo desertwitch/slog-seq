@@ -246,7 +246,7 @@ func Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success(t *testing.T) {
 		require.NotEmpty(t, source.File)
 		require.NotZero(t, source.Line)
 		require.NotEmpty(t, source.Function)
-		require.Contains(t, source.Function, "Test_SeqHandler_AddSource_IncludesSourceInfo_Success")
+		require.Contains(t, source.Function, "Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success")
 	case <-time.After(2000 * time.Millisecond):
 		t.Fatal("Timed out waiting for log event in eventsCh")
 	}
@@ -338,11 +338,11 @@ func Test_SeqHandler_Handle_AnonymousGroup_InlinesAttributes_Success(t *testing.
 
 	logger := slog.New(handler)
 
-	logger.Info("anon-group-arg",
+	logger.Info("anon-group",
 		slog.Any("", payload{ID: 42, Name: "keyname"}))
 
 	logger.With("", payload{ID: 42, Name: "keyname"}).
-		Info("anon-group-with")
+		Info("anon-group")
 
 	evt1 := <-handler.workers[0].eventsCh
 	evt2 := <-handler.workers[0].eventsCh
@@ -354,6 +354,7 @@ func Test_SeqHandler_Handle_AnonymousGroup_InlinesAttributes_Success(t *testing.
 	require.Equal(t, "keyname", evt2.Properties["name"])
 
 	evt1.Timestamp = evt2.Timestamp
+
 	require.Equal(t, evt1, evt2)
 }
 
