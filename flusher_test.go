@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,16 +35,16 @@ func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
 	return &http.Client{Transport: transport}
 }
 
-func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
+// Expectation: The flusher should flush events when the batch size is reached.
+func Test_runBackgroundFlusher_FlushOnBatchSize_Success(t *testing.T) {
 	t.Parallel()
 
-	// Create a SeqHandler with small batchSize for easy testing.
 	handler := &SeqHandler{
 		shared: &shared{
 			client:        GetHTTPClientMock(200, "ok", func() {}),
 			seqURL:        "http://example.com",
-			flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
-			batchSize:     2,               // flush after 2 events
+			flushInterval: 100 * time.Hour,
+			batchSize:     2,
 			workerCount:   1,
 			workers: []worker{{
 				eventsCh:    make(chan CLEFEvent, 10),
@@ -58,39 +57,23 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 	w := &handler.workers[0]
 	handler.workerWg.Add(1)
 
-	// Start runBackgroundFlusher in background
 	go handler.runBackgroundFlusher(w)
 
-	// Send 2 events (exactly batchSize); expect immediate flush
-	e1 := CLEFEvent{Message: "event1", Timestamp: time.Now()}
-	e2 := CLEFEvent{Message: "event2", Timestamp: time.Now()}
+	w.eventsCh <- CLEFEvent{Message: "event1", Timestamp: time.Now()}
+	w.eventsCh <- CLEFEvent{Message: "event2", Timestamp: time.Now()}
 
-	w.eventsCh <- e1
-	w.eventsCh <- e2
-
-	// Close eventsCh, then wait
 	close(w.eventsCh)
 	handler.workerWg.Wait()
 
-	// If we reached here, it means flush happened upon hitting batchSize (2).
-	// We didn't explicitly check what was posted; for that, see the next test with a more elaborate mock.
-	// Here we simply test we didn't panic and that code ran to completion.
-	// Additional success checks can be done by counting calls, etc.
-
-	// No leftover events expected in retryBuffer
-	assert.Empty(t, w.retryBuffer, "retryBuffer should be empty after successful flush")
+	require.Empty(t, w.retryBuffer, "retryBuffer should be empty after successful flush")
 }
 
-func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
+// Expectation: The flusher should flush events after the flush interval even if batch size is not reached.
+func Test_runBackgroundFlusher_FlushOnInterval_Success(t *testing.T) {
 	t.Parallel()
 
-	// This test verifies that if fewer than batchSize events are in the channel,
-	// the flush happens after flushInterval.
-
-	// We'll keep flushInterval short so that we don't have to wait long.
 	flushInterval := 50 * time.Millisecond
 
-	// We'll track how many times our mock is called to ensure flush occurs.
 	var callCount int
 
 	handler := &SeqHandler{
@@ -98,7 +81,7 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 			client:        GetHTTPClientMock(200, "ok", func() { callCount++ }),
 			seqURL:        "http://example.com",
 			flushInterval: flushInterval,
-			batchSize:     10, // large batchSize so it won't flush except on interval
+			batchSize:     10,
 		},
 	}
 
@@ -110,13 +93,10 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 
 	go handler.runBackgroundFlusher(w)
 
-	// Send 1 event (less than batchSize).
 	w.eventsCh <- CLEFEvent{Message: "event1", Timestamp: time.Now()}
 
-	// Wait a bit longer than flushInterval to ensure flush is triggered
 	time.Sleep(2 * flushInterval)
 
-	// Terminate
 	close(w.eventsCh)
 	handler.workerWg.Wait()
 
@@ -124,14 +104,12 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 	// The exact number can vary if the background flusher loop ran more than once
 	// but it should be at least 1.
 	require.GreaterOrEqual(t, callCount, 1)
-	assert.Empty(t, w.retryBuffer)
+	require.Empty(t, w.retryBuffer)
 }
 
-func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
+// Expectation: The flusher should retry failed batches and succeed on subsequent attempts.
+func Test_runBackgroundFlusher_RetryOnFailure_Success(t *testing.T) {
 	t.Parallel()
-
-	// This test will simulate a first failure on sending batch,
-	// then a subsequent success, ensuring retryBuffer is used.
 
 	var attempts int
 	handler := &SeqHandler{
@@ -163,38 +141,27 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 
 	w := &worker{
 		eventsCh:    make(chan CLEFEvent, 10),
-		retryBuffer: nil, // start empty
+		retryBuffer: nil,
 	}
 
 	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
-	// Send 2 events -> triggers flush immediately (batchSize=2).
-	e1 := CLEFEvent{Message: "fail1", Timestamp: time.Now()}
-	e2 := CLEFEvent{Message: "fail2", Timestamp: time.Now()}
+	w.eventsCh <- CLEFEvent{Message: "fail1", Timestamp: time.Now()}
+	w.eventsCh <- CLEFEvent{Message: "fail2", Timestamp: time.Now()}
 
-	w.eventsCh <- e1
-	w.eventsCh <- e2
-
-	// Give the background flusher a microsecond to process the batch trigger
 	time.Sleep(10 * time.Millisecond)
 
-	// Close and wait
 	close(w.eventsCh)
 	handler.workerWg.Wait()
 
-	// We expect:
-	//  - First attempt to send => 500 => both events remain in retryBuffer
-	//  - Second attempt when flushCurrentBatch is called before exit => success => retryBuffer cleared
-
-	// So there should have been 2 attempts total.
-	assert.Equal(t, 2, attempts, "expected 2 attempts to send batch")
-	// Retry buffer should be empty after the final success
-	assert.Empty(t, w.retryBuffer)
+	require.Equal(t, 2, attempts, "expected 2 attempts to send batch")
+	require.Empty(t, w.retryBuffer)
 }
 
-func TestRunBackgroundFlusher_RetryBufferFlushedOnClose(t *testing.T) {
+// Expectation: The flusher should flush the retry buffer when the channel is closed.
+func Test_runBackgroundFlusher_RetryBufferFlushedOnClose_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -236,23 +203,44 @@ func TestRunBackgroundFlusher_RetryBufferFlushedOnClose(t *testing.T) {
 	handler.workerWg.Add(1)
 	go handler.runBackgroundFlusher(w)
 
-	// Close immediately - no new events, just the retry buffer
 	close(w.eventsCh)
 	handler.workerWg.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()
 
-	if len(sent) == 0 {
-		t.Error("expected retry buffer to be flushed on close, but nothing was sent")
-	}
-
-	if len(w.retryBuffer) != 0 {
-		t.Errorf("expected retry buffer to be empty after close, got %d events", len(w.retryBuffer))
-	}
+	require.NotEmpty(t, sent, "expected retry buffer to be flushed on close")
+	require.Empty(t, w.retryBuffer, "expected retry buffer to be empty after close")
 }
 
-func TestAttemptSendBatch_SplitsOnRequestTooLarge(t *testing.T) {
+// Expectation: The flusher should exit immediately and not process events when noFlush is set.
+func Test_runBackgroundFlusher_NoFlushModeExits_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := &SeqHandler{
+		shared: &shared{
+			noFlush:       true,
+			flushInterval: 1 * time.Millisecond,
+		},
+	}
+
+	w := &worker{
+		eventsCh: make(chan CLEFEvent, 1),
+	}
+
+	handler.workerWg.Add(1)
+	go handler.runBackgroundFlusher(w)
+
+	w.eventsCh <- CLEFEvent{Message: "test", Timestamp: time.Now()}
+
+	close(w.eventsCh)
+	handler.workerWg.Wait()
+
+	require.Nil(t, w.retryBuffer, "retryBuffer should remain nil in noFlush mode")
+}
+
+// Expectation: The function should split oversized batches and send them in smaller chunks.
+func Test_attemptSendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -305,25 +293,20 @@ func TestAttemptSendBatch_SplitsOnRequestTooLarge(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if len(leftover) != 0 {
-		t.Errorf("expected no leftover, got %d events", len(leftover))
-	}
+	require.Empty(t, leftover, "expected no leftover events")
 
 	// All events should have been sent in batches of 1 or 2
 	total := 0
 	for _, n := range sentBatches {
-		if n > 2 {
-			t.Errorf("batch of size %d should have been split", n)
-		}
+		require.LessOrEqual(t, n, 2, "batch should have been split to at most 2")
 		total += n
 	}
 
-	if total != len(events) {
-		t.Errorf("expected %d total events sent, got %d", len(events), total)
-	}
+	require.Equal(t, len(events), total, "expected all events to be sent")
 }
 
-func TestAttemptSendBatch_DropsOversizedSingleEvent(t *testing.T) {
+// Expectation: The function should drop a single event that exceeds the server size limit.
+func Test_attemptSendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
 	t.Parallel()
 
 	var errorCalled bool
@@ -353,16 +336,12 @@ func TestAttemptSendBatch_DropsOversizedSingleEvent(t *testing.T) {
 
 	leftover := handler.attemptSendBatch(events)
 
-	if len(leftover) != 0 {
-		t.Errorf("expected single oversized event to be dropped, got %d leftover", len(leftover))
-	}
-
-	if !errorCalled {
-		t.Error("expected error handler to be called when dropping oversized event")
-	}
+	require.Empty(t, leftover, "expected single oversized event to be dropped")
+	require.True(t, errorCalled, "expected error handler to be called when dropping oversized event")
 }
 
-func TestAttemptSendBatch_PartialFailureOnSplit(t *testing.T) {
+// Expectation: The function should return leftover events from the failed half of a split batch.
+func Test_attemptSendBatch_PartialFail_ReturnsLeftover_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -417,23 +396,16 @@ func TestAttemptSendBatch_PartialFailureOnSplit(t *testing.T) {
 
 	leftover := handler.attemptSendBatch(events)
 
-	// Left half (e1, e2) succeeded, right half (e3, e4) failed with 500
-	if len(leftover) != 2 {
-		t.Errorf("expected 2 leftover events from failed right half, got %d", len(leftover))
-	}
-
-	if leftover[0].Message != "e3" || leftover[1].Message != "e4" {
-		t.Errorf("expected leftover to be e3 and e4, got %s and %s", leftover[0].Message, leftover[1].Message)
-	}
+	require.Len(t, leftover, 2, "expected 2 leftover events from failed right half")
+	require.Equal(t, "e3", leftover[0].Message)
+	require.Equal(t, "e4", leftover[1].Message)
 }
 
-func TestPurgeOldEvents(t *testing.T) {
+// Expectation: The function should remove events older than the cutoff from the retry buffer.
+func Test_purgeOldEvents_RemovesOldEvents_Success(t *testing.T) {
 	t.Parallel()
 
-	// Directly test purgeOldEvents, ensuring that events older than a certain cutoff are removed.
 	now := time.Now()
-
-	// Some events older than 5 minutes, some newer
 	oldEvent := CLEFEvent{Message: "old", Timestamp: now.Add(-10 * time.Minute)}
 	newEvent := CLEFEvent{Message: "new", Timestamp: now.Add(-1 * time.Minute)}
 
@@ -448,37 +420,6 @@ func TestPurgeOldEvents(t *testing.T) {
 	cutoff := now.Add(-5 * time.Minute)
 	handler.purgeOldEvents(w, cutoff)
 
-	// We expect only the new event to remain (the old one is older than cutoff).
 	require.Len(t, w.retryBuffer, 1, "expected only one event left in retryBuffer")
-	assert.Equal(t, "new", w.retryBuffer[0].Message)
-}
-
-func TestNoFlushMode(t *testing.T) {
-	t.Parallel()
-
-	// If h.noFlush is set, runBackgroundFlusher should exit immediately.
-	handler := &SeqHandler{
-		shared: &shared{
-			noFlush:       true,
-			flushInterval: 1 * time.Millisecond,
-		},
-	}
-
-	w := &worker{
-		eventsCh: make(chan CLEFEvent, 1),
-	}
-
-	handler.workerWg.Add(1)
-
-	go handler.runBackgroundFlusher(w)
-
-	// Even if we send events, it should immediately return and do nothing.
-	w.eventsCh <- CLEFEvent{Message: "test", Timestamp: time.Now()}
-
-	// Close channels
-	close(w.eventsCh)
-	handler.workerWg.Wait()
-
-	// Confirm that we never stored anything in retryBuffer
-	assert.Nil(t, w.retryBuffer, "retryBuffer should remain nil/empty in noFlush mode")
+	require.Equal(t, "new", w.retryBuffer[0].Message)
 }
