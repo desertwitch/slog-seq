@@ -41,16 +41,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		select {
 		case e, ok := <-w.eventsCh:
 			if !ok {
-				if len(events) > 0 {
-					if len(w.retryBuffer) > 0 {
-						leftover := h.sendWithRetry(w.retryBuffer)
-						w.retryBuffer = leftover
-					}
-					leftover := h.sendWithRetry(events)
-					if leftover != nil {
-						w.retryBuffer = append(w.retryBuffer, leftover...)
-					}
-				}
+				h.flushCurrentBatch(w, &events)
 
 				return
 			}
@@ -78,12 +69,14 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 		w.retryBuffer = leftover
 	}
 
-	leftover := h.sendWithRetry(*events)
-	if leftover != nil {
-		w.retryBuffer = append(w.retryBuffer, leftover...)
-	}
+	if len(*events) > 0 {
+		leftover := h.sendWithRetry(*events)
+		if leftover != nil {
+			w.retryBuffer = append(w.retryBuffer, leftover...)
+		}
 
-	*events = (*events)[:0]
+		*events = (*events)[:0]
+	}
 }
 
 func encodeEvent(e CLEFEvent) map[string]any {

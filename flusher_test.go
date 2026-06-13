@@ -124,17 +124,30 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 	// This test will simulate a first failure on sending batch,
 	// then a subsequent success, ensuring retryBuffer is used.
 
-	attempts := 0
-
-	successClient := GetHTTPClientMock(200, "ok", func() { attempts++ })
-	failClient := GetHTTPClientMock(500, "internal error", func() { attempts++ })
-
+	var attempts int
 	handler := &SeqHandler{
 		shared: &shared{
-			client:        failClient,
-			seqURL:        "http://example.com",
-			flushInterval: 100 * time.Hour, // won't flush automatically
-			batchSize:     2,
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						attempts++
+						if attempts == 1 {
+							return &http.Response{
+								StatusCode: 500,
+								Body:       io.NopCloser(bytes.NewBufferString("error")),
+							}, nil
+						}
+						return &http.Response{
+							StatusCode: 200,
+							Body:       io.NopCloser(bytes.NewBufferString("ok")),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			flushInterval:    100 * time.Hour,
+			batchSize:        2,
+			errorHandlerFunc: func(err error) {},
 		},
 	}
 
@@ -153,7 +166,9 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 
 	w.eventsCh <- e1
 	w.eventsCh <- e2
-	handler.client = successClient // switch to success client for next batch
+
+	// Give the background flusher a microsecond to process the batch trigger
+	time.Sleep(10 * time.Millisecond)
 
 	// Close and wait
 	close(w.eventsCh)
