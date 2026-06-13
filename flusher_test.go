@@ -23,6 +23,7 @@ func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
 	transport := &mockTransport{
 		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
 			f()
+
 			return &http.Response{
 				StatusCode: status,
 				Body:       io.NopCloser(bytes.NewBufferString(msg)),
@@ -34,6 +35,8 @@ func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
 }
 
 func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
+	t.Parallel()
+
 	// Create a SeqHandler with small batchSize for easy testing.
 	handler := &SeqHandler{
 		shared: &shared{
@@ -77,6 +80,8 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 }
 
 func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
+	t.Parallel()
+
 	// This test verifies that if fewer than batchSize events are in the channel,
 	// the flush happens after flushInterval.
 
@@ -121,6 +126,8 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 }
 
 func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
+	t.Parallel()
+
 	// This test will simulate a first failure on sending batch,
 	// then a subsequent success, ensuring retryBuffer is used.
 
@@ -133,12 +140,13 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 						attempts++
 						if attempts == 1 {
 							return &http.Response{
-								StatusCode: 500,
+								StatusCode: http.StatusInternalServerError,
 								Body:       io.NopCloser(bytes.NewBufferString("error")),
 							}, nil
 						}
+
 						return &http.Response{
-							StatusCode: 200,
+							StatusCode: http.StatusOK,
 							Body:       io.NopCloser(bytes.NewBufferString("ok")),
 						}, nil
 					},
@@ -185,6 +193,8 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 }
 
 func TestPurgeOldEvents(t *testing.T) {
+	t.Parallel()
+
 	// Directly test purgeOldEvents, ensuring that events older than a certain cutoff are removed.
 	now := time.Now()
 
@@ -209,6 +219,8 @@ func TestPurgeOldEvents(t *testing.T) {
 }
 
 func TestNoFlushMode(t *testing.T) {
+	t.Parallel()
+
 	// If h.noFlush is set, runBackgroundFlusher should exit immediately.
 	handler := &SeqHandler{
 		shared: &shared{

@@ -13,6 +13,8 @@ import (
 )
 
 func TestSlogtest(t *testing.T) {
+	t.Parallel()
+
 	var mu sync.Mutex
 	var captured []string
 

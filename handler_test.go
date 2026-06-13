@@ -13,6 +13,8 @@ import (
 
 // TestNewSeqHandler tests constructing a new handler with various config.
 func TestNewSeqHandler(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://localhost:5341",
 		WithAPIKey("test-key"),
 		WithBatchSize(50),
@@ -42,6 +44,8 @@ func TestNewSeqHandler(t *testing.T) {
 
 // TestSeqHandler_Handle checks that Handle() sends events with correct properties.
 func TestSeqHandler_Handle(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -77,6 +81,8 @@ func TestSeqHandler_Handle(t *testing.T) {
 
 // TestSeqHandler_Enabled checks that level filtering via HandlerOptions works.
 func TestSeqHandler_Enabled(t *testing.T) {
+	t.Parallel()
+
 	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
@@ -104,6 +110,8 @@ func TestSeqHandler_Enabled(t *testing.T) {
 
 // TestSeqHandler_WithAttrs checks that WithAttrs merges attributes into subsequent logs.
 func TestSeqHandler_WithAttrs(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -134,6 +142,8 @@ func TestSeqHandler_WithAttrs(t *testing.T) {
 
 // TestSeqHandler_WithGroup checks that WithGroup prefixes attribute keys.
 func TestSeqHandler_WithGroup(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -166,6 +176,8 @@ func TestSeqHandler_WithGroup(t *testing.T) {
 
 // TestSeqHandler_Close checks that Close() completes without error and presumably flushes.
 func TestSeqHandler_Close(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -182,6 +194,8 @@ func TestSeqHandler_Close(t *testing.T) {
 
 // TestSeqHandler_convertLevel ensures level conversion matches expectations.
 func TestSeqHandler_convertLevel(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		in       slog.Level
 		expected string
@@ -203,6 +217,8 @@ func TestSeqHandler_convertLevel(t *testing.T) {
 
 // TestSeqHandler_addSource ensures source information is added to log events.
 func TestSeqHandler_addSource(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -243,6 +259,8 @@ func TestSeqHandler_addSource(t *testing.T) {
 // TestSeqHandler_grouping ensures that grouping works as expected.
 // test case from comments in slog.Handler.
 func TestSeqHandler_grouping(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
 		WithBatchSize(10),
@@ -266,6 +284,8 @@ func TestSeqHandler_grouping(t *testing.T) {
 }
 
 func TestSeqHandler_replaceAttr(t *testing.T) {
+	t.Parallel()
+
 	opts := &slog.HandlerOptions{
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == "password" {
@@ -316,6 +336,8 @@ func (p payload) LogValue() slog.Value {
 }
 
 func TestSeqHandler_AnonymousGroup(t *testing.T) {
+	t.Parallel()
+
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 		withNoFlush(), // No flushing for this test.
