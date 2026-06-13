@@ -128,3 +128,12 @@ func WithErrorHandlerFunc(fn func(error)) SeqOption {
 		return h
 	})
 }
+
+// withNoFlush disables flushing (for use in tests).
+func withNoFlush() SeqOption {
+	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		h.noFlush = true
+
+		return h
+	})
+}

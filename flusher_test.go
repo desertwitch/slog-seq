@@ -20,9 +20,9 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
-	f()
 	transport := &mockTransport{
 		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+			f()
 			return &http.Response{
 				StatusCode: status,
 				Body:       io.NopCloser(bytes.NewBufferString(msg)),

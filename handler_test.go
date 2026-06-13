@@ -47,8 +47,8 @@ func TestSeqHandler_Handle(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
 	)
-	handler.noFlush = true // Disable flushing for this test
 	defer handler.Close()
 
 	logger := slog.New(handler)
@@ -109,9 +109,9 @@ func TestSeqHandler_WithAttrs(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for this test
 
 	logger := slog.New(handler)
 	logger2 := logger.With("service", "testsvc")
@@ -139,9 +139,9 @@ func TestSeqHandler_WithGroup(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for this test
 
 	logger := slog.New(handler)
 	grouped := logger.WithGroup("request").With("id", "1234").WithGroup("headers").With("Accept", "application/json")
@@ -209,9 +209,9 @@ func TestSeqHandler_addSource(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithSourceKey("gosource"),
 		WithHandlerOptions(&slog.HandlerOptions{AddSource: true}),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for this test
 
 	logger := slog.New(handler)
 
@@ -237,8 +237,6 @@ func TestSeqHandler_addSource(t *testing.T) {
 		}
 	case <-time.After(2000 * time.Millisecond):
 		t.Error("Timed out waiting for log event in eventsCh")
-	default:
-		t.Error("Expected event to be sent")
 	}
 }
 
@@ -250,9 +248,9 @@ func TestSeqHandler_grouping(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for this test
 
 	ctx := context.Background()
 	logger := slog.New(handler)
@@ -283,9 +281,9 @@ func TestSeqHandler_replaceAttr(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
 		WithHandlerOptions(opts),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for this test
 
 	logger := slog.New(handler)
 	logger.Info("Super secret info", "password", "2Fat2Fly")
@@ -320,9 +318,9 @@ func (p payload) LogValue() slog.Value {
 func TestSeqHandler_AnonymousGroup(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
 	)
 	defer handler.Close()
-	handler.noFlush = true // Disable flushing for the test
 
 	logger := slog.New(handler)
 
