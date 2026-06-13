@@ -1,5 +1,8 @@
 github_checks: false
 
+ignore:
+  - "cmd"
+
 coverage:
   status:
     project: off
