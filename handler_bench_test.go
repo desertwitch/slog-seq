@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -322,12 +323,13 @@ func BenchmarkHandle_AddSource(b *testing.B) {
 	handler := benchmarkHandler(b)
 
 	handler.options.AddSource = true
+	pc, _, _, _ := runtime.Caller(0)
 
 	r := slog.NewRecord(
 		time.Now(),
 		slog.LevelInfo,
 		"hello",
-		0,
+		pc,
 	)
 
 	b.ReportAllocs()

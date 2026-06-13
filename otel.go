@@ -10,6 +10,8 @@ import (
 	tr "go.opentelemetry.io/otel/trace"
 )
 
+var _ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
+
 type LoggingSpanProcessor struct {
 	Handler *SeqHandler
 }
