@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -378,5 +379,288 @@ func TestSeqHandler_AnonymousGroup(t *testing.T) {
 		cmpopts.IgnoreFields(CLEFEvent{}, "Timestamp", "Message"),
 	); diff != "" {
 		t.Errorf("events differ: (-arg +with)\n%s", diff)
+	}
+}
+
+func TestSeqHandler_MultipleWorkers(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(4),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	const n = 100
+	for i := range n {
+		logger.Info("event", "i", i)
+	}
+
+	// Collect all events from all workers
+	total := 0
+	for w := range handler.workers {
+	drain:
+		for {
+			select {
+			case <-handler.workers[w].eventsCh:
+				total++
+			default:
+				break drain
+			}
+		}
+	}
+
+	if total != n {
+		t.Errorf("expected %d events across workers, got %d", n, total)
+	}
+}
+
+func TestSeqHandler_MultipleWorkersDistribution(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(4),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	const n = 1000
+	for i := range n {
+		logger.Info("event", "i", i)
+	}
+
+	// Check that work was distributed across workers, not all to one
+	counts := make([]int, len(handler.workers))
+	for w := range handler.workers {
+		for {
+			select {
+			case <-handler.workers[w].eventsCh:
+				counts[w]++
+			default:
+				goto next
+			}
+		}
+	next:
+	}
+
+	for w, c := range counts {
+		if c == 0 {
+			t.Errorf("worker %d received no events", w)
+		}
+	}
+}
+
+func TestSeqHandler_ConcurrentHandleCalls(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(2),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	const goroutines = 10
+	const perGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for g := range goroutines {
+		go func(id int) {
+			defer wg.Done()
+			for i := range perGoroutine {
+				logger.Info("concurrent", "goroutine", id, "i", i)
+			}
+		}(g)
+	}
+
+	wg.Wait()
+
+	total := 0
+	for w := range handler.workers {
+		for {
+			select {
+			case <-handler.workers[w].eventsCh:
+				total++
+			default:
+				goto next
+			}
+		}
+	next:
+	}
+
+	expected := goroutines * perGoroutine
+	if total != expected {
+		t.Errorf("expected %d events, got %d", expected, total)
+	}
+}
+
+func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(2),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Goroutine 1: log with base logger
+	go func() {
+		defer wg.Done()
+		for i := range 50 {
+			logger.Info("base", "i", i)
+		}
+	}()
+
+	// Goroutine 2: derive with WithAttrs and log
+	go func() {
+		defer wg.Done()
+		l := logger.With("service", "svc")
+		for i := range 50 {
+			l.Info("with-attrs", "i", i)
+		}
+	}()
+
+	// Goroutine 3: derive with WithGroup and log
+	go func() {
+		defer wg.Done()
+		l := logger.WithGroup("g").With("k", "v")
+		for i := range 50 {
+			l.Info("with-group", "i", i)
+		}
+	}()
+
+	wg.Wait()
+
+	total := 0
+	for w := range handler.workers {
+		for {
+			select {
+			case <-handler.workers[w].eventsCh:
+				total++
+			default:
+				goto next
+			}
+		}
+	next:
+	}
+
+	if total != 150 {
+		t.Errorf("expected 150 events, got %d", total)
+	}
+}
+
+func TestSeqHandler_HandleAfterClose(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		withNoFlush(),
+	)
+
+	_ = handler.Close()
+
+	// Should not panic
+	logger := slog.New(handler)
+	logger.Info("after close", "key", "value")
+}
+
+func TestSeqHandler_DoubleClose(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+	)
+
+	if err := handler.Close(); err != nil {
+		t.Errorf("first Close returned error: %v", err)
+	}
+	if err := handler.Close(); err != nil {
+		t.Errorf("second Close returned error: %v", err)
+	}
+}
+
+func TestSeqHandler_BlockingCloseUnblocksSenders(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		WithNonBlocking(false),
+		withNoFlush(),
+	)
+
+	logger := slog.New(handler)
+
+	// Fill the channel
+	for range maxWorkerEventBacklog {
+		logger.Info("fill")
+	}
+
+	// Start a goroutine that will block on send
+	done := make(chan struct{})
+	go func() {
+		logger.Info("blocked")
+		close(done)
+	}()
+
+	// Give it a moment to block
+	time.Sleep(10 * time.Millisecond)
+
+	// Close should unblock the sender
+	_ = handler.Close()
+
+	select {
+	case <-done:
+		// success - sender was unblocked
+	case <-time.After(2 * time.Second):
+		t.Error("blocked sender was not unblocked by Close")
+	}
+}
+
+func TestSeqHandler_NonBlockingDropsOnFullChannel(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		WithNonBlocking(true),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	// Fill the channel beyond capacity
+	for i := range maxWorkerEventBacklog + 500 {
+		logger.Info("flood", "i", i)
+	}
+
+	// Drain and count
+	count := 0
+	for {
+		select {
+		case <-handler.workers[0].eventsCh:
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+
+	if count > maxWorkerEventBacklog {
+		t.Errorf("expected at most %d events, got %d", maxWorkerEventBacklog, count)
+	}
+	if count == 0 {
+		t.Error("expected some events to be received")
 	}
 }
