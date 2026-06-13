@@ -14,8 +14,15 @@ import (
 func TestOnEnd_WithException(t *testing.T) {
 	t.Parallel()
 
-	handler := &SeqHandler{shared: &shared{noFlush: true, workerCount: 1}}
-	handler.start()
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
+	)
+	defer handler.Close()
+
 	processor := &LoggingSpanProcessor{Handler: handler}
 
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))
@@ -61,8 +68,15 @@ func TestOnEnd_WithException(t *testing.T) {
 func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
 	t.Parallel()
 
-	handler := &SeqHandler{shared: &shared{noFlush: true, workerCount: 1}}
-	handler.start()
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
+	)
+	defer handler.Close()
+
 	processor := &LoggingSpanProcessor{Handler: handler}
 
 	res := resource.NewSchemaless(
