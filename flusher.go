@@ -3,6 +3,7 @@ package slogseq
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -117,9 +118,9 @@ func encodeEvent(e CLEFEvent) map[string]any {
 	return topLevel
 }
 
-func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
+func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
-		return true
+		return nil
 	}
 
 	var sb strings.Builder
@@ -127,8 +128,7 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
 	for _, e := range events {
 		topLevel := encodeEvent(e)
 		if err := enc.Encode(topLevel); err != nil {
-			// Return false => indicates we should retry
-			return false
+			return events
 		}
 	}
 
@@ -136,7 +136,7 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
 	if err != nil {
 		h.errorHandlerFunc(err)
 
-		return false
+		return events
 	}
 	req.Header.Set("Content-Type", "application/vnd.serilog.clef")
 	if h.apiKey != "" {
@@ -147,26 +147,32 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
 	if err != nil {
 		h.errorHandlerFunc(err)
 
-		return false
+		return events
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusRequestEntityTooLarge {
-		// The event batch is too large to send to the Seq server.
-		// Drop the entire batch and log an error.
-		h.errorHandlerFunc(fmt.Errorf("dropping event; size exceeds Seq server limit, batch size: %d", len(events)))
+		if len(events) == 1 {
+			h.errorHandlerFunc(errors.New("dropping single event; size exceeds Seq server limit"))
 
-		return true
+			return nil // dropped, not retryable
+		}
+
+		// Split batch in half and retry via recursion
+		mid := len(events) / 2 //nolint:mnd
+		leftover := h.attemptSendBatch(events[:mid])
+		rightover := h.attemptSendBatch(events[mid:])
+
+		return append(leftover, rightover...)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		h.errorHandlerFunc(fmt.Errorf("seq server returned status code %d", resp.StatusCode))
 
-		return false
+		return events
 	}
 
-	// Success
-	return true
+	return nil
 }
 
 func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
@@ -174,12 +180,7 @@ func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
 		return nil
 	}
 
-	success := h.attemptSendBatch(events)
-	if success {
-		return nil // nothing left to retry
-	}
-
-	return events
+	return h.attemptSendBatch(events)
 }
 
 func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
