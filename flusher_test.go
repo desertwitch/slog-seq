@@ -373,8 +373,7 @@ func TestAttemptSendBatch_PartialFailureOnSplit(t *testing.T) {
 			client: &http.Client{
 				Transport: &mockTransport{
 					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
-						body, _ := io.ReadAll(req.Body)
-						lines := strings.Count(strings.TrimSpace(string(body)), "\n") + 1
+						_, _ = io.Copy(io.Discard, req.Body)
 
 						mu.Lock()
 						attempts++
@@ -384,19 +383,18 @@ func TestAttemptSendBatch_PartialFailureOnSplit(t *testing.T) {
 						// First call: 413 to trigger split
 						// Second call (left half): success
 						// Third call (right half): 500 server error
-						switch {
-						case current == 1:
+						switch current {
+						case 1:
 							return &http.Response{
 								StatusCode: http.StatusRequestEntityTooLarge,
 								Body:       io.NopCloser(bytes.NewReader(nil)),
 							}, nil
-						case current == 2:
+						case 2:
 							return &http.Response{
 								StatusCode: http.StatusOK,
 								Body:       io.NopCloser(bytes.NewReader(nil)),
 							}, nil
 						default:
-							_ = lines
 							return &http.Response{
 								StatusCode: http.StatusInternalServerError,
 								Body:       io.NopCloser(bytes.NewReader(nil)),
