@@ -140,9 +140,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		dst := nestInto(props, ha.groups)
 
 		for _, a := range ha.attrs {
-			if a, ok := h.resolveAttr(ha.groups, a); ok {
-				addAttr(dst, a)
-			}
+			h.addResolvedAttr(dst, ha.groups, a)
 		}
 	}
 
@@ -151,9 +149,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		recordDst := nestInto(props, h.handlerGroups)
 
 		r.Attrs(func(a slog.Attr) bool {
-			if a, ok := h.resolveAttr(h.handlerGroups, a); ok {
-				addAttr(recordDst, a)
-			}
+			h.addResolvedAttr(recordDst, h.handlerGroups, a)
 
 			return true
 		})
@@ -164,9 +160,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 			frame, _ := caller.Next()
 			source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
 
-			if a, ok := h.resolveAttr(h.handlerGroups, slog.Any(h.sourceKey, &source)); ok {
-				addAttr(recordDst, a)
-			}
+			h.addResolvedAttr(recordDst, h.handlerGroups, slog.Any(h.sourceKey, &source))
 		}
 	}
 
@@ -282,6 +276,45 @@ func (h *SeqHandler) Close() error {
 	return nil
 }
 
+func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog.Attr) {
+	a, ok := h.resolveAttr(groups, a)
+	if !ok {
+		return
+	}
+
+	if a.Key == "" {
+		if a.Value.Kind() == slog.KindGroup {
+			// Anonymous group, inline
+			for _, ga := range a.Value.Group() {
+				h.addResolvedAttr(dst, groups, ga)
+			}
+		}
+
+		// Non-group empty key: drop silently.
+		return
+	}
+
+	if a.Value.Kind() == slog.KindGroup {
+		// Named group:
+		// Nest children into a sub-map, merging with any same-key existing map.
+		groupMap, ok := dst[a.Key].(map[string]any)
+		if !ok {
+			groupMap = make(map[string]any)
+			dst[a.Key] = groupMap
+		}
+
+		childGroups := append(groups, a.Key)
+		for _, ga := range a.Value.Group() {
+			h.addResolvedAttr(groupMap, childGroups, ga)
+		}
+
+		return
+	}
+
+	// Regular value:
+	dst[a.Key] = a.Value.Any()
+}
+
 // resolveAttr applies ReplaceAttr and converts error values.
 func (h *SeqHandler) resolveAttr(groups []string, a slog.Attr) (slog.Attr, bool) {
 	a.Value = a.Value.Resolve()
@@ -319,41 +352,6 @@ func nestInto(dst map[string]any, groups []string) map[string]any {
 	}
 
 	return dst
-}
-
-// addAttr inserts a resolved attr into the props map. Handles anonymous groups
-// (empty key with KindGroup) by inlining children, and named groups by
-// creating/merging sub-maps.
-func addAttr(dst map[string]any, a slog.Attr) {
-	a.Value = a.Value.Resolve()
-
-	if a.Key == "" {
-		if a.Value.Kind() == slog.KindGroup {
-			// Anonymous group, inline
-			for _, ga := range a.Value.Group() {
-				addAttr(dst, ga)
-			}
-		}
-
-		// Non-group empty key: drop silently.
-		return
-	}
-
-	if a.Value.Kind() == slog.KindGroup {
-		// Named group:
-		// Nest children into a sub-map, merging with any same-key existing map.
-		groupMap, ok := dst[a.Key].(map[string]any)
-		if !ok {
-			groupMap = make(map[string]any)
-			dst[a.Key] = groupMap
-		}
-		for _, ga := range a.Value.Group() {
-			addAttr(groupMap, ga)
-		}
-	} else {
-		// Regular value:
-		dst[a.Key] = a.Value.Any()
-	}
 }
 
 func convertLevel(l slog.Level) string {
