@@ -1,4 +1,7 @@
-.PHONY: check help lint test test-coverage
+.PHONY: benchmark check help lint test test-coverage
+
+benchmark: ## Runs the benchmark suite
+	go test -bench=. -benchmem .
 
 check: lint test ## Runs lint and tests
 

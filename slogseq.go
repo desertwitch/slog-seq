@@ -21,9 +21,11 @@ func (f seqOptionFunc) apply(h *SeqHandler) *SeqHandler {
 // opts is a list of options to configure the Seq handler.
 func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
 	handler := newSeqHandler(seqURL)
+
 	for _, opt := range opts {
 		handler = opt.apply(handler)
 	}
+
 	handler.start()
 
 	return slog.New(handler), handler
@@ -86,7 +88,9 @@ func WithHTTPClient(client *http.Client) SeqOption {
 // WithGlobalAttrs sets the global attributes to include in all events.
 func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		h.goas = append(h.goas, groupOrAttrs{attrs: attrs})
+		h.handlerAttrs = append(h.handlerAttrs, attrSet{
+			attrs: attrs,
+		})
 
 		return h
 	})
@@ -125,6 +129,7 @@ func WithNonBlocking(nonBlocking bool) SeqOption {
 	})
 }
 
+// WithErrorHandlerFunc sets the error handler function.
 func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.errorHandlerFunc = fn
