@@ -125,14 +125,18 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Determine all active groups for source/ReplaceAttr context
 	groups := h.activeGroups()
 
-	// Process WithGroup/WithAttrs in order
+	// Process WithGroup/WithAttrs in order, for so-far seen groups.
+	var groupsSoFar []string
+
 	for _, goa := range h.goas {
 		if goa.group != "" {
-			continue // groups are handled via key prefixing
+			groupsSoFar = append(groupsSoFar, goa.group)
+
+			continue
 		}
 		for _, a := range goa.attrs {
 			if h.options.ReplaceAttr != nil {
-				a = h.options.ReplaceAttr(groups, a)
+				a = h.options.ReplaceAttr(groupsSoFar, a)
 				if a.Key == "" {
 					continue
 				}

@@ -382,6 +382,48 @@ func TestSeqHandler_AnonymousGroup(t *testing.T) {
 	}
 }
 
+func TestSeqHandler_ReplaceAttrGroupScope(t *testing.T) {
+	t.Parallel()
+
+	var captured [][]string
+
+	opts := &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			captured = append(captured, append([]string{}, groups...))
+
+			return a
+		},
+	}
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		WithHandlerOptions(opts),
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	logger.With("a", 1).WithGroup("g").With("b", 2).Info("test", "c", 3)
+
+	<-handler.workers[0].eventsCh
+
+	// "a" should see no groups
+	// "b" should see ["g"]
+	// "c" should see ["g"]
+	if len(captured) < 3 {
+		t.Fatalf("expected at least 3 ReplaceAttr calls, got %d", len(captured))
+	}
+	if len(captured[0]) != 0 {
+		t.Errorf("expected no groups for 'a', got %v", captured[0])
+	}
+	if len(captured[1]) != 1 || captured[1][0] != "g" {
+		t.Errorf("expected [g] for 'b', got %v", captured[1])
+	}
+	if len(captured[2]) != 1 || captured[2][0] != "g" {
+		t.Errorf("expected [g] for 'c', got %v", captured[2])
+	}
+}
+
 func TestSeqHandler_MultipleWorkers(t *testing.T) {
 	t.Parallel()
 
