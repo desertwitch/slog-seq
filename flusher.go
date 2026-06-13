@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"net/http"
@@ -150,7 +151,11 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 
 		return events
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Drain the body to allow re-use of TCP connection.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusRequestEntityTooLarge {
 		if len(events) == 1 {
