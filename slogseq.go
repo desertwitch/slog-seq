@@ -105,6 +105,10 @@ func WithSourceKey(key string) SeqOption {
 // Default is 1. Consider increasing this if you have a very high volume of events.
 func WithWorkers(count int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if count < 1 {
+			count = defaultWorkerCount
+		}
+
 		h.workerCount = count
 
 		return h
