@@ -11,57 +11,82 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
-	"slices"
+)
+
+const (
+	defaultBatchSize       = 50
+	defaultFlushInterval   = 2 * time.Second
+	defaultWorkerCount     = 1
+	defaultSendBlocking    = false
+	defaultDisableFlushing = false
+
+	maxWorkerEventBacklog = 1000
 )
 
 type worker struct {
-	eventsCh chan CLEFEvent
-	doneCh   chan struct{}
-	wg       sync.WaitGroup
-	// retry buffer
+	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent
 	purgeTicker *time.Ticker
 }
 
-type SeqHandler struct {
-	// config
+// groupOrAttrs holds either a group name or a list of slog.Attrs.
+// This preserves the ordering of WithGroup and WithAttrs calls.
+type groupOrAttrs struct {
+	group string      // group name if non-empty
+	attrs []slog.Attr // attrs if non-empty
+}
+
+type shared struct {
+	// config (immutable after start, but no reason to copy)
 	seqURL           string
 	apiKey           string
 	batchSize        int
 	flushInterval    time.Duration
 	disableTLSVerify bool
-	sourceKey        string
 	workerCount      int
 	nonBlocking      bool
-	noFlush          bool // Used in tests
+	noFlush          bool
 
 	// http client
 	client *http.Client
 
 	// concurrency
-	workers []worker
-	next    uint32
+	next     atomic.Uint32
+	workers  []worker
+	workerWg sync.WaitGroup
 
-	// optional function that will get called on errors
+	mu        sync.RWMutex
+	closed    bool // through mu
+	closeCh   chan struct{}
+	closeOnce sync.Once
+
+	// error handling
 	errorHandlerFunc func(error)
+}
 
-	// Other fields for global attrs, grouping, etc.
-	attrs   []slog.Attr
-	groups  []string
-	options slog.HandlerOptions
+type SeqHandler struct {
+	*shared
+
+	goas      []groupOrAttrs
+	options   slog.HandlerOptions
+	sourceKey string
 }
 
 func newSeqHandler(seqURL string) *SeqHandler {
 	h := &SeqHandler{
-		seqURL: seqURL,
-		// sane defaults
-		batchSize:     50,
-		flushInterval: 2 * time.Second,
-		workerCount:   1,
-		nonBlocking:   true,
-		noFlush:       false,
-		sourceKey:     slog.SourceKey,
-		options:       slog.HandlerOptions{},
+		shared: &shared{
+			seqURL:  seqURL,
+			closeCh: make(chan struct{}),
+
+			batchSize:     defaultBatchSize,
+			flushInterval: defaultFlushInterval,
+			workerCount:   defaultWorkerCount,
+			nonBlocking:   !defaultSendBlocking,
+			noFlush:       defaultDisableFlushing,
+		},
+
+		sourceKey: slog.SourceKey,
+		options:   slog.HandlerOptions{},
 	}
 
 	return h
@@ -69,19 +94,21 @@ func newSeqHandler(seqURL string) *SeqHandler {
 
 func (h *SeqHandler) start() {
 	if h.client == nil {
-		h.client = newHttpClient(h.disableTLSVerify)
+		h.client = newHTTPClient(h.disableTLSVerify)
 	}
 	if h.errorHandlerFunc == nil {
-		h.errorHandlerFunc = func(err error) {
+		h.errorHandlerFunc = func(_ error) {
 			// by default we do nothing
 		}
 	}
+
 	h.workers = make([]worker, h.workerCount)
+
 	// Start background workers
 	for i := range h.workerCount {
-		h.workers[i].eventsCh = make(chan CLEFEvent, 1000)
-		h.workers[i].doneCh = make(chan struct{})
-		h.workers[i].wg.Add(1)
+		h.workers[i].eventsCh = make(chan CLEFEvent, maxWorkerEventBacklog)
+
+		h.workerWg.Add(1)
 		go h.runBackgroundFlusher(&h.workers[i])
 	}
 }
@@ -95,36 +122,57 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Collect attributes into a map
 	props := make(map[string]any)
 
+	// Determine all active groups for source/ReplaceAttr context
+	groups := h.activeGroups()
+
+	// Process WithGroup/WithAttrs in order, for so-far seen groups.
+	var groupsSoFar []string
+
+	for _, goa := range h.goas {
+		if goa.group != "" {
+			groupsSoFar = append(groupsSoFar, goa.group)
+
+			continue
+		}
+		for _, a := range goa.attrs {
+			if h.options.ReplaceAttr != nil {
+				a = h.options.ReplaceAttr(groupsSoFar, a)
+				if a.Key == "" {
+					continue
+				}
+			}
+
+			if v, ok := a.Value.Any().(error); ok {
+				a.Value = slog.StringValue(v.Error())
+			}
+
+			h.addAttr(props, a)
+		}
+	}
+
+	// Process record attrs under all active groups
+	r.Attrs(func(a slog.Attr) bool {
+		if a, ok := h.resolveAttr(groups, a); ok {
+			h.addAttr(props, a)
+		}
+
+		return true
+	})
+
+	// Process source last so it overwrites user-provided keys with reserved names.
 	if h.options.AddSource {
 		pc := r.PC
 		caller := runtime.CallersFrames([]uintptr{pc})
 		frame, _ := caller.Next()
 		source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
-		sourceAttr := slog.Any(h.sourceKey, &source)
-		r.AddAttrs(sourceAttr)
+
+		if a, ok := h.resolveAttr(groups, slog.Any(h.sourceKey, &source)); ok {
+			h.addAttr(props, a)
+		}
 	}
-	h.addAttrs(props, h.attrs)
-	r.Attrs(func(a slog.Attr) bool {
-		if h.options.ReplaceAttr != nil {
-			a = h.options.ReplaceAttr(h.groups, a)
-			if a.Key == "" {
-				return true
-			}
-		}
-
-		if len(h.groups) > 0 && a.Key != h.sourceKey {
-			a.Key = strings.Join(h.groups, ".") + "." + a.Key
-		}
-
-		if v, ok := a.Value.Any().(error); ok {
-			a.Value = slog.StringValue(v.Error())
-		}
-		h.addAttr(props, a)
-		return true
-	})
 
 	// split multi-line messages into a message (first line) and 'exception' (rest)
-	msg := strings.SplitN(r.Message, "\n", 2)
+	msg := strings.SplitN(r.Message, "\n", 2) //nolint:mnd
 
 	var exception string
 	if len(msg) == 1 {
@@ -141,17 +189,26 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		Level:      levelString,
 		Properties: dottedToNested(props),
 	}
+
 	if spanCtx.IsValid() {
 		event.TraceID = spanCtx.TraceID().String()
 		event.SpanID = spanCtx.SpanID().String()
 	}
+
 	h.HandleCLEFEvent(event)
 
 	return nil
 }
 
 func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
-	idx := atomic.AddUint32(&h.next, 1) % uint32(len(h.workers))
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if h.closed {
+		return
+	}
+
+	idx := h.next.Add(1) % uint32(len(h.workers)) //nolint:gosec
 	if h.nonBlocking {
 		// send to channel, drop if full
 		select {
@@ -165,54 +222,76 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 		select {
 		case h.workers[idx].eventsCh <- event:
 			// success
+		case <-h.closeCh:
+			// unblock on close, drop event
 		}
 	}
 }
 
-func (h *SeqHandler) Enabled(ctx context.Context, l slog.Level) bool {
+func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	if h.options.Level != nil {
 		return l >= h.options.Level.Level()
 	}
+
 	return true
 }
 
 func (h *SeqHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	h2 := *h
-	h2.attrs = slices.Clone(h.attrs)
+	if len(attrs) == 0 {
+		return h
+	}
+
+	// Resolve and prefix attrs with current groups
+	groups := h.activeGroups()
+	resolved := make([]slog.Attr, 0, len(attrs))
+
 	for _, a := range attrs {
 		a.Value = a.Value.Resolve()
 
 		if a.Key == "" {
-			h2.attrs = append(h2.attrs, a)
+			resolved = append(resolved, a)
+
 			continue
 		}
 
-		if len(h2.groups) > 0 && a.Key != h2.sourceKey {
-			a.Key = strings.Join(h2.groups, ".") + "." + a.Key
+		if len(groups) > 0 && a.Key != h.sourceKey {
+			a.Key = strings.Join(groups, ".") + "." + a.Key
 		}
 
-		h2.attrs = append(h2.attrs, a)
+		resolved = append(resolved, a)
 	}
 
-	return &h2
+	return h.withGroupOrAttrs(groupOrAttrs{attrs: resolved})
 }
 
 func (h *SeqHandler) WithGroup(name string) slog.Handler {
-	h2 := *h
-	h2.groups = slices.Clone(h.groups)
-	h2.groups = append(h2.groups, name)
+	if name == "" {
+		return h // no-op
+	}
 
-	return &h2
+	return h.withGroupOrAttrs(groupOrAttrs{group: name})
 }
 
 func (h *SeqHandler) Close() error {
-	// this is ugly, but we need to give all the events a chance to be sent
-	time.Sleep(50 * time.Millisecond)
-	for i := range h.workerCount {
-		close(h.workers[i].eventsCh)
-		close(h.workers[i].doneCh)
-		h.workers[i].wg.Wait()
-	}
+	h.closeOnce.Do(func() {
+		// Blocked senders hold read locks, so we release these first.
+		// Otherwise we cannot acquire the write lock for "closed" below.
+		close(h.closeCh)
+
+		// We switch the bool to prevent new senders from entering.
+		h.mu.Lock()
+		h.closed = true
+		h.mu.Unlock()
+
+		// Once no more sends are guaranteed, we let the events drain.
+		for i := range h.workerCount {
+			close(h.workers[i].eventsCh)
+		}
+
+		// We wait until all events are drained and workers have left.
+		h.workerWg.Wait()
+	})
+
 	return nil
 }
 
@@ -221,10 +300,45 @@ func (h *SeqHandler) SourceKey() string {
 	return h.sourceKey
 }
 
-func (h *SeqHandler) addAttrs(dst map[string]any, attrs []slog.Attr) {
-	for _, a := range attrs {
-		h.addAttr(dst, a)
+func (h *SeqHandler) withGroupOrAttrs(goa groupOrAttrs) *SeqHandler {
+	h2 := *h
+	h2.goas = make([]groupOrAttrs, len(h.goas)+1)
+	copy(h2.goas, h.goas)
+	h2.goas[len(h2.goas)-1] = goa
+
+	return &h2
+}
+
+// activeGroups returns the group names currently in effect,
+// collected from the goas slice.
+func (h *SeqHandler) activeGroups() []string {
+	var groups []string
+	for _, goa := range h.goas {
+		if goa.group != "" {
+			groups = append(groups, goa.group)
+		}
 	}
+
+	return groups
+}
+
+func (h *SeqHandler) resolveAttr(groups []string, a slog.Attr) (slog.Attr, bool) {
+	if h.options.ReplaceAttr != nil {
+		a = h.options.ReplaceAttr(groups, a)
+		if a.Key == "" {
+			return a, false
+		}
+	}
+
+	if len(groups) > 0 && a.Key != h.sourceKey {
+		a.Key = strings.Join(groups, ".") + "." + a.Key
+	}
+
+	if v, ok := a.Value.Any().(error); ok {
+		a.Value = slog.StringValue(v.Error())
+	}
+
+	return a, true
 }
 
 func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
@@ -237,10 +351,11 @@ func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
 				h.addAttr(dst, ga)
 			}
 		}
+
 		return
 	}
 
-	switch a.Value.Kind() {
+	switch a.Value.Kind() { //nolint:exhaustive
 	case slog.KindGroup:
 		groupMap, ok := dst[a.Key].(map[string]any)
 		if !ok {
@@ -250,6 +365,7 @@ func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
 		for _, ga := range a.Value.Group() {
 			h.addAttr(groupMap, ga)
 		}
+
 	default:
 		dst[a.Key] = a.Value.Any()
 	}
@@ -257,16 +373,19 @@ func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
 
 func dottedToNested(props map[string]any) map[string]any {
 	out := make(map[string]any, len(props))
+
 	for k, v := range props {
 		path := strings.Split(k, ".")
 		addNested(out, path, v)
 	}
+
 	return out
 }
 
 func addNested(dst map[string]any, path []string, val any) {
 	if len(path) == 1 {
 		dst[path[0]] = val
+
 		return
 	}
 
@@ -284,12 +403,16 @@ func convertLevel(l slog.Level) string {
 	switch l {
 	case slog.LevelDebug:
 		return CLEFLevelDebug.String()
+
 	case slog.LevelInfo:
 		return CLEFLevelInformation.String()
+
 	case slog.LevelWarn:
 		return CLEFLevelWarning.String()
+
 	case slog.LevelError:
 		return CLEFLevelError.String()
+
 	default:
 		return CLEFLevelInformation.String()
 	}

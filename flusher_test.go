@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,40 +21,42 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return m.RoundTripFunc(req)
 }
 
-func GetHttpClientMock(status int, msg string, f func()) *http.Client {
-	f()
+func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
 	transport := &mockTransport{
 		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+			f()
+
 			return &http.Response{
 				StatusCode: status,
 				Body:       io.NopCloser(bytes.NewBufferString(msg)),
 			}, nil
 		},
 	}
+
 	return &http.Client{Transport: transport}
 }
 
 func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
+	t.Parallel()
+
 	// Create a SeqHandler with small batchSize for easy testing.
 	handler := &SeqHandler{
-		client:        GetHttpClientMock(200, "ok", func() {}),
-		seqURL:        "http://example.com",
-		flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
-		batchSize:     2,               // flush after 2 events
-		workerCount:   1,
-		workers: []worker{{
-			eventsCh:    make(chan CLEFEvent, 10),
-			doneCh:      make(chan struct{}),
-			wg:          sync.WaitGroup{},
-			retryBuffer: make([]CLEFEvent, 0),
-		}},
-		errorHandlerFunc: func(err error) {
-			return
+		shared: &shared{
+			client:        GetHTTPClientMock(200, "ok", func() {}),
+			seqURL:        "http://example.com",
+			flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
+			batchSize:     2,               // flush after 2 events
+			workerCount:   1,
+			workers: []worker{{
+				eventsCh:    make(chan CLEFEvent, 10),
+				retryBuffer: make([]CLEFEvent, 0),
+			}},
+			errorHandlerFunc: func(err error) {},
 		},
 	}
 
 	w := &handler.workers[0]
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	// Start runBackgroundFlusher in background
 	go handler.runBackgroundFlusher(w)
@@ -65,10 +68,9 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 	w.eventsCh <- e1
 	w.eventsCh <- e2
 
-	// Close eventsCh and signal doneCh, then wait
+	// Close eventsCh, then wait
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// If we reached here, it means flush happened upon hitting batchSize (2).
 	// We didn't explicitly check what was posted; for that, see the next test with a more elaborate mock.
@@ -80,6 +82,8 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 }
 
 func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
+	t.Parallel()
+
 	// This test verifies that if fewer than batchSize events are in the channel,
 	// the flush happens after flushInterval.
 
@@ -90,19 +94,19 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 	var callCount int
 
 	handler := &SeqHandler{
-		client:        GetHttpClientMock(200, "ok", func() { callCount++ }),
-		seqURL:        "http://example.com",
-		flushInterval: flushInterval,
-		batchSize:     10, // large batchSize so it won't flush except on interval
+		shared: &shared{
+			client:        GetHTTPClientMock(200, "ok", func() { callCount++ }),
+			seqURL:        "http://example.com",
+			flushInterval: flushInterval,
+			batchSize:     10, // large batchSize so it won't flush except on interval
+		},
 	}
 
 	w := &worker{
 		eventsCh: make(chan CLEFEvent, 10),
-		doneCh:   make(chan struct{}),
-		wg:       sync.WaitGroup{},
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -114,8 +118,7 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 
 	// Terminate
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// By now we expect at least 1 flush (callCount >= 1).
 	// The exact number can vary if the background flusher loop ran more than once
@@ -125,29 +128,45 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 }
 
 func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
+	t.Parallel()
+
 	// This test will simulate a first failure on sending batch,
 	// then a subsequent success, ensuring retryBuffer is used.
 
-	attempts := 0
-
-	successClient := GetHttpClientMock(200, "ok", func() { attempts++ })
-	failClient := GetHttpClientMock(500, "internal error", func() { attempts++ })
-
+	var attempts int
 	handler := &SeqHandler{
-		client:        failClient,
-		seqURL:        "http://example.com",
-		flushInterval: 100 * time.Hour, // won't flush automatically
-		batchSize:     2,
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						attempts++
+						if attempts == 1 {
+							return &http.Response{
+								StatusCode: http.StatusInternalServerError,
+								Body:       io.NopCloser(bytes.NewBufferString("error")),
+							}, nil
+						}
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewBufferString("ok")),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			flushInterval:    100 * time.Hour,
+			batchSize:        2,
+			errorHandlerFunc: func(err error) {},
+		},
 	}
 
 	w := &worker{
 		eventsCh:    make(chan CLEFEvent, 10),
-		doneCh:      make(chan struct{}),
-		wg:          sync.WaitGroup{},
 		retryBuffer: nil, // start empty
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -157,12 +176,13 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 
 	w.eventsCh <- e1
 	w.eventsCh <- e2
-	handler.client = successClient // switch to success client for next batch
+
+	// Give the background flusher a microsecond to process the batch trigger
+	time.Sleep(10 * time.Millisecond)
 
 	// Close and wait
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// We expect:
 	//  - First attempt to send => 500 => both events remain in retryBuffer
@@ -174,7 +194,242 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 	assert.Empty(t, w.retryBuffer)
 }
 
+func TestRunBackgroundFlusher_RetryBufferFlushedOnClose(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var sent []string
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						mu.Lock()
+						sent = append(sent, string(body))
+						mu.Unlock()
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			flushInterval:    100 * time.Hour,
+			batchSize:        100,
+			workerCount:      1,
+			errorHandlerFunc: func(err error) {},
+		},
+	}
+
+	w := &worker{
+		eventsCh: make(chan CLEFEvent, 10),
+		retryBuffer: []CLEFEvent{
+			{Message: "retry1", Timestamp: time.Now()},
+			{Message: "retry2", Timestamp: time.Now()},
+		},
+	}
+
+	handler.workerWg.Add(1)
+	go handler.runBackgroundFlusher(w)
+
+	// Close immediately - no new events, just the retry buffer
+	close(w.eventsCh)
+	handler.workerWg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(sent) == 0 {
+		t.Error("expected retry buffer to be flushed on close, but nothing was sent")
+	}
+
+	if len(w.retryBuffer) != 0 {
+		t.Errorf("expected retry buffer to be empty after close, got %d events", len(w.retryBuffer))
+	}
+}
+
+func TestAttemptSendBatch_SplitsOnRequestTooLarge(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var sentBatches []int
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						lines := strings.Count(strings.TrimSpace(string(body)), "\n") + 1
+
+						mu.Lock()
+						defer mu.Unlock()
+
+						// Reject batches larger than 2 events
+						if lines > 2 {
+							return &http.Response{
+								StatusCode: http.StatusRequestEntityTooLarge,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						}
+
+						sentBatches = append(sentBatches, lines)
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(err error) {},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+		{Message: "e3", Timestamp: time.Now()},
+		{Message: "e4", Timestamp: time.Now()},
+		{Message: "e5", Timestamp: time.Now()},
+		{Message: "e6", Timestamp: time.Now()},
+	}
+
+	leftover := handler.attemptSendBatch(events)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(leftover) != 0 {
+		t.Errorf("expected no leftover, got %d events", len(leftover))
+	}
+
+	// All events should have been sent in batches of 1 or 2
+	total := 0
+	for _, n := range sentBatches {
+		if n > 2 {
+			t.Errorf("batch of size %d should have been split", n)
+		}
+		total += n
+	}
+
+	if total != len(events) {
+		t.Errorf("expected %d total events sent, got %d", len(events), total)
+	}
+}
+
+func TestAttemptSendBatch_DropsOversizedSingleEvent(t *testing.T) {
+	t.Parallel()
+
+	var errorCalled bool
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						return &http.Response{
+							StatusCode: http.StatusRequestEntityTooLarge,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL: "http://example.com",
+			errorHandlerFunc: func(err error) {
+				errorCalled = true
+			},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "huge event", Timestamp: time.Now()},
+	}
+
+	leftover := handler.attemptSendBatch(events)
+
+	if len(leftover) != 0 {
+		t.Errorf("expected single oversized event to be dropped, got %d leftover", len(leftover))
+	}
+
+	if !errorCalled {
+		t.Error("expected error handler to be called when dropping oversized event")
+	}
+}
+
+func TestAttemptSendBatch_PartialFailureOnSplit(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var attempts int
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						_, _ = io.Copy(io.Discard, req.Body)
+
+						mu.Lock()
+						attempts++
+						current := attempts
+						mu.Unlock()
+
+						// First call: 413 to trigger split
+						// Second call (left half): success
+						// Third call (right half): 500 server error
+						switch current {
+						case 1:
+							return &http.Response{
+								StatusCode: http.StatusRequestEntityTooLarge,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						case 2:
+							return &http.Response{
+								StatusCode: http.StatusOK,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						default:
+							return &http.Response{
+								StatusCode: http.StatusInternalServerError,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						}
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(err error) {},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+		{Message: "e3", Timestamp: time.Now()},
+		{Message: "e4", Timestamp: time.Now()},
+	}
+
+	leftover := handler.attemptSendBatch(events)
+
+	// Left half (e1, e2) succeeded, right half (e3, e4) failed with 500
+	if len(leftover) != 2 {
+		t.Errorf("expected 2 leftover events from failed right half, got %d", len(leftover))
+	}
+
+	if leftover[0].Message != "e3" || leftover[1].Message != "e4" {
+		t.Errorf("expected leftover to be e3 and e4, got %s and %s", leftover[0].Message, leftover[1].Message)
+	}
+}
+
 func TestPurgeOldEvents(t *testing.T) {
+	t.Parallel()
+
 	// Directly test purgeOldEvents, ensuring that events older than a certain cutoff are removed.
 	now := time.Now()
 
@@ -183,9 +438,9 @@ func TestPurgeOldEvents(t *testing.T) {
 	newEvent := CLEFEvent{Message: "new", Timestamp: now.Add(-1 * time.Minute)}
 
 	handler := &SeqHandler{
-		workers: []worker{{retryBuffer: []CLEFEvent{oldEvent, newEvent}}},
-		errorHandlerFunc: func(err error) {
-			return
+		shared: &shared{
+			workers:          []worker{{retryBuffer: []CLEFEvent{oldEvent, newEvent}}},
+			errorHandlerFunc: func(err error) {},
 		},
 	}
 	w := &handler.workers[0]
@@ -199,19 +454,21 @@ func TestPurgeOldEvents(t *testing.T) {
 }
 
 func TestNoFlushMode(t *testing.T) {
+	t.Parallel()
+
 	// If h.noFlush is set, runBackgroundFlusher should exit immediately.
 	handler := &SeqHandler{
-		noFlush:       true,
-		flushInterval: 1 * time.Millisecond,
+		shared: &shared{
+			noFlush:       true,
+			flushInterval: 1 * time.Millisecond,
+		},
 	}
 
 	w := &worker{
 		eventsCh: make(chan CLEFEvent, 1),
-		doneCh:   make(chan struct{}),
-		wg:       sync.WaitGroup{},
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -220,8 +477,7 @@ func TestNoFlushMode(t *testing.T) {
 
 	// Close channels
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// Confirm that we never stored anything in retryBuffer
 	assert.Nil(t, w.retryBuffer, "retryBuffer should remain nil/empty in noFlush mode")

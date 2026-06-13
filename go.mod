@@ -1,4 +1,4 @@
-module github.com/sokkalf/slog-seq
+module github.com/desertwitch/slog-seq
 
 go 1.24.0
 

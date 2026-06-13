@@ -12,8 +12,17 @@ import (
 )
 
 func TestOnEnd_WithException(t *testing.T) {
-	handler := &SeqHandler{noFlush: true, workerCount: 1}
-	handler.start()
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
+	)
+	defer handler.Close()
+
 	processor := &LoggingSpanProcessor{Handler: handler}
 
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))
@@ -57,8 +66,17 @@ func TestOnEnd_WithException(t *testing.T) {
 }
 
 func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
-	handler := &SeqHandler{noFlush: true, workerCount: 1}
-	handler.start()
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+		WithWorkers(1),
+		withNoFlush(), // No flushing for this test.
+	)
+	defer handler.Close()
+
 	processor := &LoggingSpanProcessor{Handler: handler}
 
 	res := resource.NewSchemaless(
@@ -78,7 +96,7 @@ func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
 
 	// One event emitted from AddEvent, one from span end.
 	var events []CLEFEvent
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		select {
 		case e := <-handler.workers[0].eventsCh:
 			events = append(events, e)
