@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
@@ -36,24 +35,22 @@ func GetHttpClientMock(status int, msg string, f func()) *http.Client {
 func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 	// Create a SeqHandler with small batchSize for easy testing.
 	handler := &SeqHandler{
-		client:        GetHttpClientMock(200, "ok", func() {}),
-		seqURL:        "http://example.com",
-		flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
-		batchSize:     2,               // flush after 2 events
-		workerCount:   1,
-		workers: []worker{{
-			eventsCh:    make(chan CLEFEvent, 10),
-			doneCh:      make(chan struct{}),
-			wg:          sync.WaitGroup{},
-			retryBuffer: make([]CLEFEvent, 0),
-		}},
-		errorHandlerFunc: func(err error) {
-			return
+		shared: &shared{
+			client:        GetHttpClientMock(200, "ok", func() {}),
+			seqURL:        "http://example.com",
+			flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
+			batchSize:     2,               // flush after 2 events
+			workerCount:   1,
+			workers: []worker{{
+				eventsCh:    make(chan CLEFEvent, 10),
+				retryBuffer: make([]CLEFEvent, 0),
+			}},
+			errorHandlerFunc: func(err error) {},
 		},
 	}
 
 	w := &handler.workers[0]
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	// Start runBackgroundFlusher in background
 	go handler.runBackgroundFlusher(w)
@@ -65,10 +62,9 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 	w.eventsCh <- e1
 	w.eventsCh <- e2
 
-	// Close eventsCh and signal doneCh, then wait
+	// Close eventsCh, then wait
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// If we reached here, it means flush happened upon hitting batchSize (2).
 	// We didn't explicitly check what was posted; for that, see the next test with a more elaborate mock.
@@ -90,19 +86,19 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 	var callCount int
 
 	handler := &SeqHandler{
-		client:        GetHttpClientMock(200, "ok", func() { callCount++ }),
-		seqURL:        "http://example.com",
-		flushInterval: flushInterval,
-		batchSize:     10, // large batchSize so it won't flush except on interval
+		shared: &shared{
+			client:        GetHttpClientMock(200, "ok", func() { callCount++ }),
+			seqURL:        "http://example.com",
+			flushInterval: flushInterval,
+			batchSize:     10, // large batchSize so it won't flush except on interval
+		},
 	}
 
 	w := &worker{
 		eventsCh: make(chan CLEFEvent, 10),
-		doneCh:   make(chan struct{}),
-		wg:       sync.WaitGroup{},
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -114,8 +110,7 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 
 	// Terminate
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// By now we expect at least 1 flush (callCount >= 1).
 	// The exact number can vary if the background flusher loop ran more than once
@@ -134,20 +129,20 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 	failClient := GetHttpClientMock(500, "internal error", func() { attempts++ })
 
 	handler := &SeqHandler{
-		client:        failClient,
-		seqURL:        "http://example.com",
-		flushInterval: 100 * time.Hour, // won't flush automatically
-		batchSize:     2,
+		shared: &shared{
+			client:        failClient,
+			seqURL:        "http://example.com",
+			flushInterval: 100 * time.Hour, // won't flush automatically
+			batchSize:     2,
+		},
 	}
 
 	w := &worker{
 		eventsCh:    make(chan CLEFEvent, 10),
-		doneCh:      make(chan struct{}),
-		wg:          sync.WaitGroup{},
 		retryBuffer: nil, // start empty
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -161,8 +156,7 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 
 	// Close and wait
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// We expect:
 	//  - First attempt to send => 500 => both events remain in retryBuffer
@@ -183,9 +177,9 @@ func TestPurgeOldEvents(t *testing.T) {
 	newEvent := CLEFEvent{Message: "new", Timestamp: now.Add(-1 * time.Minute)}
 
 	handler := &SeqHandler{
-		workers: []worker{{retryBuffer: []CLEFEvent{oldEvent, newEvent}}},
-		errorHandlerFunc: func(err error) {
-			return
+		shared: &shared{
+			workers:          []worker{{retryBuffer: []CLEFEvent{oldEvent, newEvent}}},
+			errorHandlerFunc: func(err error) {},
 		},
 	}
 	w := &handler.workers[0]
@@ -201,17 +195,17 @@ func TestPurgeOldEvents(t *testing.T) {
 func TestNoFlushMode(t *testing.T) {
 	// If h.noFlush is set, runBackgroundFlusher should exit immediately.
 	handler := &SeqHandler{
-		noFlush:       true,
-		flushInterval: 1 * time.Millisecond,
+		shared: &shared{
+			noFlush:       true,
+			flushInterval: 1 * time.Millisecond,
+		},
 	}
 
 	w := &worker{
 		eventsCh: make(chan CLEFEvent, 1),
-		doneCh:   make(chan struct{}),
-		wg:       sync.WaitGroup{},
 	}
 
-	w.wg.Add(1)
+	handler.workerWg.Add(1)
 
 	go handler.runBackgroundFlusher(w)
 
@@ -220,8 +214,7 @@ func TestNoFlushMode(t *testing.T) {
 
 	// Close channels
 	close(w.eventsCh)
-	close(w.doneCh)
-	w.wg.Wait()
+	handler.workerWg.Wait()
 
 	// Confirm that we never stored anything in retryBuffer
 	assert.Nil(t, w.retryBuffer, "retryBuffer should remain nil/empty in noFlush mode")

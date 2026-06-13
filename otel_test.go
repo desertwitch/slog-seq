@@ -12,7 +12,7 @@ import (
 )
 
 func TestOnEnd_WithException(t *testing.T) {
-	handler := &SeqHandler{noFlush: true, workerCount: 1}
+	handler := &SeqHandler{shared: &shared{noFlush: true, workerCount: 1}}
 	handler.start()
 	processor := &LoggingSpanProcessor{Handler: handler}
 
@@ -57,7 +57,7 @@ func TestOnEnd_WithException(t *testing.T) {
 }
 
 func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
-	handler := &SeqHandler{noFlush: true, workerCount: 1}
+	handler := &SeqHandler{shared: &shared{noFlush: true, workerCount: 1}}
 	handler.start()
 	processor := &LoggingSpanProcessor{Handler: handler}
 

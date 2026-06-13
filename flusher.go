@@ -12,7 +12,7 @@ import (
 )
 
 func (h *SeqHandler) runBackgroundFlusher(w *worker) {
-	defer w.wg.Done()
+	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
 		return
 	}
@@ -40,6 +40,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 						w.retryBuffer = append(w.retryBuffer, leftover...)
 					}
 				}
+
 				return
 			}
 			events = append(events, e)
@@ -56,12 +57,6 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 			// Purge events older than 5 minutes from retry buffer
 			cutoff := time.Now().Add(-5 * time.Minute)
 			h.purgeOldEvents(w, cutoff)
-
-		case <-w.doneCh:
-			if len(events) > 0 {
-				h.flushCurrentBatch(w, &events)
-			}
-			return
 		}
 	}
 }
@@ -71,11 +66,12 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 		leftover := h.sendWithRetry(w.retryBuffer)
 		w.retryBuffer = leftover
 	}
-	leftover := h.sendWithRetry(*events)
 
+	leftover := h.sendWithRetry(*events)
 	if leftover != nil {
 		w.retryBuffer = append(w.retryBuffer, leftover...)
 	}
+
 	*events = (*events)[:0]
 }
 
@@ -85,6 +81,7 @@ func encodeEvent(e CLEFEvent) map[string]any {
 		"@m": e.Message,
 		"@l": e.Level,
 	}
+
 	if e.Exception != "" {
 		topLevel["@x"] = e.Exception
 	}
@@ -106,7 +103,9 @@ func encodeEvent(e CLEFEvent) map[string]any {
 	if e.SpanKind != "" {
 		topLevel["@sk"] = e.SpanKind
 	}
+
 	maps.Copy(topLevel, e.Properties)
+
 	return topLevel
 }
 
@@ -162,24 +161,29 @@ func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
 		return nil
 	}
+
 	success := h.attemptSendBatch(events)
 	if success {
 		return nil // nothing left to retry
 	}
+
 	return events
 }
 
 func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
 	newBuf := w.retryBuffer[:0]
+
 	for _, e := range w.retryBuffer {
 		if e.Timestamp.After(olderThan) {
 			newBuf = append(newBuf, e)
 		}
 	}
+
 	purgedEvents := len(w.retryBuffer) - len(newBuf)
 	if purgedEvents > 0 {
 		h.errorHandlerFunc(fmt.Errorf("purged %d events from retry buffer older than %s", purgedEvents, olderThan.Format(time.RFC3339)))
 	}
+
 	w.retryBuffer = newBuf
 }
 
