@@ -23,6 +23,8 @@ const (
 	maxWorkerEventBacklog = 1000
 )
 
+var _ slog.Handler = (*SeqHandler)(nil)
+
 type worker struct {
 	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent

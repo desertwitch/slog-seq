@@ -1,19 +1,23 @@
 package slogseq
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"testing/slogtest"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/stretchr/testify/require"
 )
 
-// TestNewSeqHandler tests constructing a new handler with various config.
-func TestNewSeqHandler(t *testing.T) {
+// Expectation: The constructor should apply all provided options correctly.
+func Test_NewSeqHandler_WithOptions_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://localhost:5341",
@@ -23,65 +27,99 @@ func TestNewSeqHandler(t *testing.T) {
 		WithHandlerOptions(&slog.HandlerOptions{Level: slog.LevelWarn}),
 	)
 
-	if handler.seqURL != "http://localhost:5341" {
-		t.Errorf("expected seqURL to be http://localhost:5341, got %s", handler.seqURL)
-	}
-	if handler.apiKey != "test-key" {
-		t.Errorf("expected apiKey to be test-key, got %s", handler.apiKey)
-	}
-	if handler.batchSize != 50 {
-		t.Errorf("expected batchSize = 50, got %d", handler.batchSize)
-	}
-	if handler.flushInterval != 5*time.Second {
-		t.Errorf("expected flushInterval = 5s, got %v", handler.flushInterval)
-	}
-	if handler.options.Level.Level() != slog.LevelWarn {
-		t.Errorf("expected level = Warn, got %v", handler.options.Level)
-	}
+	require.Equal(t, "http://localhost:5341", handler.seqURL)
+	require.Equal(t, "test-key", handler.apiKey)
+	require.Equal(t, 50, handler.batchSize)
+	require.Equal(t, 5*time.Second, handler.flushInterval)
+	require.Equal(t, slog.LevelWarn, handler.options.Level.Level())
 
-	// Clean up
 	_ = handler.Close()
 }
 
-// TestSeqHandler_Handle checks that Handle() sends events with correct properties.
-func TestSeqHandler_Handle(t *testing.T) {
+// Expectation: The handler should pass the stdlib slogtest compliance suite.
+func Test_SeqHandler_Slogtest_Compliance_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake",
-		WithAPIKey(""),
-		WithBatchSize(10),
-		WithFlushInterval(5*time.Second),
-		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
-	)
-	defer handler.Close()
+	var mu sync.Mutex
+	var captured []string
 
-	logger := slog.New(handler)
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				body, _ := io.ReadAll(req.Body)
 
-	// Log something at Info level
-	logger.Info("Hello, slog-seq!", "user", "alice", "count", 123)
+				mu.Lock()
+				for line := range strings.SplitSeq(strings.TrimSpace(string(body)), "\n") {
+					if line != "" {
+						captured = append(captured, line)
+					}
+				}
+				mu.Unlock()
 
-	select {
-	case evt := <-handler.workers[0].eventsCh:
-		if evt.Message != "Hello, slog-seq!" {
-			t.Errorf("Expected message 'Hello, slog-seq!', got '%s'", evt.Message)
-		}
-		if evt.Level != "Information" {
-			t.Errorf("Expected level = Information, got '%s'", evt.Level)
-		}
-		if evt.Properties["user"] != "alice" {
-			t.Errorf("Expected user=alice, got %v", evt.Properties["user"])
-		}
-		if evt.Properties["count"].(int64) != 123 {
-			t.Errorf("Expected count=123, got %v", evt.Properties["count"])
-		}
-	case <-time.After(2000 * time.Millisecond):
-		t.Error("Timed out waiting for log event in eventsCh")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
 	}
+
+	_, handler := NewLogger("http://fake",
+		WithHTTPClient(client),
+		WithBatchSize(1),
+		WithFlushInterval(time.Millisecond),
+	)
+
+	err := slogtest.TestHandler(handler, func() []map[string]any {
+		time.Sleep(50 * time.Millisecond)
+		_ = handler.Close()
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		results := make([]map[string]any, 0, len(captured))
+		for _, line := range captured {
+			var m map[string]any
+
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatalf("failed to parse CLEF line: %v", err)
+			}
+
+			// slogtest expects standard keys
+			parsed := make(map[string]any)
+			for k, v := range m {
+				switch k {
+				case "@t":
+					// Slog specification expects zero times to be omitted, but
+					// CLEF specification requires even zero timestamps be sent.
+					// We do this little dance to satisfy the slog test suite...
+					if s, ok := v.(string); ok {
+						t, err := time.Parse(time.RFC3339Nano, s)
+						if err == nil && t.IsZero() {
+							break // Omit it for this test.
+						}
+					}
+					parsed["time"] = v
+				case "@m":
+					parsed["msg"] = v
+				case "@l":
+					parsed["level"] = v
+				default:
+					parsed[k] = v
+				}
+			}
+
+			results = append(results, parsed)
+		}
+
+		return results
+	})
+
+	require.NoError(t, err)
 }
 
-// TestSeqHandler_Enabled checks that level filtering via HandlerOptions works.
-func TestSeqHandler_Enabled(t *testing.T) {
+// Expectation: Debug and Info levels should be disabled when minimum level is Warn.
+func Test_SeqHandler_Enabled_DebugDisabled_Success(t *testing.T) {
 	t.Parallel()
 
 	opts := &slog.HandlerOptions{Level: slog.LevelWarn}
@@ -93,24 +131,14 @@ func TestSeqHandler_Enabled(t *testing.T) {
 	)
 	defer handler.Close()
 
-	// Debug/Info should be disabled
-	if handler.Enabled(context.Background(), slog.LevelDebug) {
-		t.Error("Debug level should be disabled")
-	}
-	if handler.Enabled(context.Background(), slog.LevelInfo) {
-		t.Error("Info level should be disabled")
-	}
-	// Warn and above should be enabled
-	if !handler.Enabled(context.Background(), slog.LevelWarn) {
-		t.Error("Warn level should be enabled")
-	}
-	if !handler.Enabled(context.Background(), slog.LevelError) {
-		t.Error("Error level should be enabled")
-	}
+	require.False(t, handler.Enabled(context.Background(), slog.LevelDebug))
+	require.False(t, handler.Enabled(context.Background(), slog.LevelInfo))
+	require.True(t, handler.Enabled(context.Background(), slog.LevelWarn))
+	require.True(t, handler.Enabled(context.Background(), slog.LevelError))
 }
 
-// TestSeqHandler_WithAttrs checks that WithAttrs merges attributes into subsequent logs.
-func TestSeqHandler_WithAttrs(t *testing.T) {
+// Expectation: Handle should send events with the correct message, level, and properties.
+func Test_SeqHandler_Handle_CorrectProperties_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -118,7 +146,35 @@ func TestSeqHandler_WithAttrs(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+
+	logger.Info("Hello, slog-seq!", "user", "alice", "count", 123)
+
+	select {
+	case evt := <-handler.workers[0].eventsCh:
+		require.Equal(t, "Hello, slog-seq!", evt.Message)
+		require.Equal(t, "Information", evt.Level)
+		require.Equal(t, "alice", evt.Properties["user"])
+		require.Equal(t, int64(123), evt.Properties["count"].(int64))
+	case <-time.After(2000 * time.Millisecond):
+		t.Fatal("Timed out waiting for log event in eventsCh")
+	}
+}
+
+// Expectation: WithAttrs should merge attributes into subsequent log events.
+func Test_SeqHandler_Handle_WithAttrs_MergesAttributes_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+		WithWorkers(1),
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -129,20 +185,15 @@ func TestSeqHandler_WithAttrs(t *testing.T) {
 
 	select {
 	case evt := <-handler.workers[0].eventsCh:
-		// Should have both service=testsvc and version=1.2.3
-		if evt.Properties["service"] != "testsvc" {
-			t.Errorf("Expected service=testsvc, got %v", evt.Properties["service"])
-		}
-		if evt.Properties["version"] != "1.2.3" {
-			t.Errorf("Expected version=1.2.3, got %v", evt.Properties["version"])
-		}
+		require.Equal(t, "testsvc", evt.Properties["service"])
+		require.Equal(t, "1.2.3", evt.Properties["version"])
 	case <-time.After(2000 * time.Millisecond):
-		t.Error("Timed out waiting for WithAttrs event")
+		t.Fatal("Timed out waiting for WithAttrs event")
 	}
 }
 
-// TestSeqHandler_WithGroup checks that WithGroup prefixes attribute keys.
-func TestSeqHandler_WithGroup(t *testing.T) {
+// Expectation: WithGroup should prefix attribute keys with the group name.
+func Test_SeqHandler_Handle_WithGroup_PrefixesKeys_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -150,7 +201,7 @@ func TestSeqHandler_WithGroup(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -161,63 +212,17 @@ func TestSeqHandler_WithGroup(t *testing.T) {
 
 	select {
 	case evt := <-handler.workers[0].eventsCh:
-		// We expect keys to be "request.id" and "request.headers.Accept"
 		request := evt.Properties["request"].(map[string]any)
 		headers := request["headers"].(map[string]any)
-		if request["id"] != "1234" {
-			t.Errorf("Expected request.id=1234, got %v", request["id"])
-		}
-		if headers["Accept"] != "application/json" {
-			t.Errorf("Expected request.headers.Accept=application/json, got %v", headers["Accept"])
-		}
+		require.Equal(t, "1234", request["id"])
+		require.Equal(t, "application/json", headers["Accept"])
 	case <-time.After(2000 * time.Millisecond):
-		t.Error("Timed out waiting for grouped event")
+		t.Fatal("Timed out waiting for grouped event")
 	}
 }
 
-// TestSeqHandler_Close checks that Close() completes without error and presumably flushes.
-func TestSeqHandler_Close(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithAPIKey(""),
-		WithBatchSize(10),
-		WithFlushInterval(5*time.Second),
-	)
-
-	if err := handler.Close(); err != nil {
-		t.Errorf("Close returned error: %v", err)
-	}
-
-	// Optionally, you might check that the background goroutine is done
-	// but we can't do that directly without instrumentation or reflection.
-}
-
-// TestSeqHandler_convertLevel ensures level conversion matches expectations.
-func TestSeqHandler_convertLevel(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		in       slog.Level
-		expected string
-	}{
-		{slog.LevelDebug, "Debug"},
-		{slog.LevelInfo, "Information"},
-		{slog.LevelWarn, "Warning"},
-		{slog.LevelError, "Error"},
-		{42, "Information"}, // Something out of range
-	}
-
-	for _, c := range cases {
-		out := convertLevel(c.in)
-		if out != c.expected {
-			t.Errorf("convertLevel(%v) = %s, want %s", c.in, out, c.expected)
-		}
-	}
-}
-
-// TestSeqHandler_addSource ensures source information is added to log events.
-func TestSeqHandler_addSource(t *testing.T) {
+// Expectation: Source information should be added to log events when AddSource is enabled.
+func Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -226,7 +231,7 @@ func TestSeqHandler_addSource(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithSourceKey("gosource"),
 		WithHandlerOptions(&slog.HandlerOptions{AddSource: true}),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -236,30 +241,19 @@ func TestSeqHandler_addSource(t *testing.T) {
 
 	select {
 	case evt := <-handler.workers[0].eventsCh:
-		if evt.Properties["gosource"] == nil {
-			t.Error("Expected gosource to be set")
-		}
+		require.NotNil(t, evt.Properties["gosource"], "expected gosource to be set")
 		source := evt.Properties["gosource"].(*slog.Source)
-		if source.File == "" {
-			t.Error("Expected source file to be set")
-		}
-		if source.Line == 0 {
-			t.Error("Expected source line to be set")
-		}
-		if source.Function == "" {
-			t.Error("Expected source function to be set")
-		}
-		if !strings.Contains(source.Function, "TestSeqHandler_addSource") {
-			t.Errorf("Expected source function to contain TestSeqHandler_addSource, got %s", source.Function)
-		}
+		require.NotEmpty(t, source.File)
+		require.NotZero(t, source.Line)
+		require.NotEmpty(t, source.Function)
+		require.Contains(t, source.Function, "Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success")
 	case <-time.After(2000 * time.Millisecond):
-		t.Error("Timed out waiting for log event in eventsCh")
+		t.Fatal("Timed out waiting for log event in eventsCh")
 	}
 }
 
-// TestSeqHandler_grouping ensures that grouping works as expected.
-// test case from comments in slog.Handler.
-func TestSeqHandler_grouping(t *testing.T) {
+// Expectation: WithGroup as argument and as inline group should produce identical events.
+func Test_SeqHandler_Handle_Grouping_ConsistentOutput_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -267,7 +261,7 @@ func TestSeqHandler_grouping(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -279,12 +273,12 @@ func TestSeqHandler_grouping(t *testing.T) {
 	event1 := <-handler.workers[0].eventsCh
 	event2 := <-handler.workers[0].eventsCh
 
-	if diff := cmp.Diff(event1, event2, cmpopts.IgnoreFields(CLEFEvent{}, "Timestamp")); diff != "" {
-		t.Errorf("events differ: (-got +want)\n%s", diff)
-	}
+	event1.Timestamp = event2.Timestamp
+	require.Equal(t, event1, event2)
 }
 
-func TestSeqHandler_replaceAttr(t *testing.T) {
+// Expectation: ReplaceAttr should be able to redact sensitive attribute values.
+func Test_SeqHandler_Handle_ReplaceAttr_RedactsPassword_Success(t *testing.T) {
 	t.Parallel()
 
 	opts := &slog.HandlerOptions{
@@ -302,7 +296,7 @@ func TestSeqHandler_replaceAttr(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
 		WithHandlerOptions(opts),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -313,14 +307,10 @@ func TestSeqHandler_replaceAttr(t *testing.T) {
 	event1 := <-handler.workers[0].eventsCh
 	event2 := <-handler.workers[0].eventsCh
 
-	if event1.Properties["password"] != "*****" {
-		t.Errorf("Expected password=*****, got %v", event1.Properties["password"])
-	}
+	require.Equal(t, "*****", event1.Properties["password"])
 
 	secretInfo := event2.Properties["secret_info"].(map[string]any)
-	if secretInfo["password"] != "*****" {
-		t.Errorf("Expected password=*****, got %v", secretInfo["password"])
-	}
+	require.Equal(t, "*****", secretInfo["password"])
 }
 
 // A tiny payload that implements slog.LogValuer.
@@ -336,53 +326,40 @@ func (p payload) LogValue() slog.Value {
 	)
 }
 
-func TestSeqHandler_AnonymousGroup(t *testing.T) {
+// Expectation: Anonymous groups should inline their attributes into the parent properties.
+func Test_SeqHandler_Handle_AnonymousGroup_InlinesAttributes_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
 	logger := slog.New(handler)
 
-	// 1. Argument-style anonymous group.
-	logger.Info("anon-group-arg",
+	logger.Info("anon-group",
 		slog.Any("", payload{ID: 42, Name: "keyname"}))
 
-	// 2. With-style anonymous group.
 	logger.With("", payload{ID: 42, Name: "keyname"}).
-		Info("anon-group-with")
+		Info("anon-group")
 
 	evt1 := <-handler.workers[0].eventsCh
 	evt2 := <-handler.workers[0].eventsCh
 
-	// --- Assertions for the first event (argument style) -----------
-	if got := evt1.Properties["id"]; got != int64(42) {
-		t.Errorf("argument style: expected id=42, got %v", got)
-	}
-	if got := evt1.Properties["name"]; got != "keyname" {
-		t.Errorf("argument style: expected name=arg, got %v", got)
-	}
+	require.Equal(t, int64(42), evt1.Properties["id"])
+	require.Equal(t, "keyname", evt1.Properties["name"])
 
-	// --- Assertions for the second event (With style) --------------
-	if got := evt2.Properties["id"]; got != int64(42) {
-		t.Errorf("With style: expected id=42, got %v", got)
-	}
-	if got := evt2.Properties["name"]; got != "keyname" {
-		t.Errorf("With style: expected name=with, got %v", got)
-	}
+	require.Equal(t, int64(42), evt2.Properties["id"])
+	require.Equal(t, "keyname", evt2.Properties["name"])
 
-	// The two events should differ only in Timestamp and Message.
-	if diff := cmp.Diff(evt1, evt2,
-		cmpopts.IgnoreFields(CLEFEvent{}, "Timestamp", "Message"),
-	); diff != "" {
-		t.Errorf("events differ: (-arg +with)\n%s", diff)
-	}
+	evt1.Timestamp = evt2.Timestamp
+
+	require.Equal(t, evt1, evt2)
 }
 
-func TestSeqHandler_ReplaceAttrGroupScope(t *testing.T) {
+// Expectation: ReplaceAttr should receive the correct group scope for each attribute.
+func Test_SeqHandler_Handle_ReplaceAttrGroupScope_CorrectGroups_Success(t *testing.T) {
 	t.Parallel()
 
 	var captured [][]string
@@ -407,24 +384,14 @@ func TestSeqHandler_ReplaceAttrGroupScope(t *testing.T) {
 
 	<-handler.workers[0].eventsCh
 
-	// "a" should see no groups
-	// "b" should see ["g"]
-	// "c" should see ["g"]
-	if len(captured) < 3 {
-		t.Fatalf("expected at least 3 ReplaceAttr calls, got %d", len(captured))
-	}
-	if len(captured[0]) != 0 {
-		t.Errorf("expected no groups for 'a', got %v", captured[0])
-	}
-	if len(captured[1]) != 1 || captured[1][0] != "g" {
-		t.Errorf("expected [g] for 'b', got %v", captured[1])
-	}
-	if len(captured[2]) != 1 || captured[2][0] != "g" {
-		t.Errorf("expected [g] for 'c', got %v", captured[2])
-	}
+	require.GreaterOrEqual(t, len(captured), 3, "expected at least 3 ReplaceAttr calls")
+	require.Empty(t, captured[0], "expected no groups for 'a'")
+	require.Equal(t, []string{"g"}, captured[1], "expected [g] for 'b'")
+	require.Equal(t, []string{"g"}, captured[2], "expected [g] for 'c'")
 }
 
-func TestSeqHandler_MultipleWorkers(t *testing.T) {
+// Expectation: All events should be received across multiple workers.
+func Test_SeqHandler_Handle_MultipleWorkers_AllEventsReceived_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -440,7 +407,6 @@ func TestSeqHandler_MultipleWorkers(t *testing.T) {
 		logger.Info("event", "i", i)
 	}
 
-	// Collect all events from all workers
 	total := 0
 	for w := range handler.workers {
 	drain:
@@ -454,12 +420,11 @@ func TestSeqHandler_MultipleWorkers(t *testing.T) {
 		}
 	}
 
-	if total != n {
-		t.Errorf("expected %d events across workers, got %d", n, total)
-	}
+	require.Equal(t, n, total)
 }
 
-func TestSeqHandler_MultipleWorkersDistribution(t *testing.T) {
+// Expectation: Events should be distributed across all workers, not concentrated on one.
+func Test_SeqHandler_Handle_MultipleWorkers_EvenDistribution_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -475,7 +440,6 @@ func TestSeqHandler_MultipleWorkersDistribution(t *testing.T) {
 		logger.Info("event", "i", i)
 	}
 
-	// Check that work was distributed across workers, not all to one
 	counts := make([]int, len(handler.workers))
 	for w := range handler.workers {
 		for {
@@ -490,13 +454,12 @@ func TestSeqHandler_MultipleWorkersDistribution(t *testing.T) {
 	}
 
 	for w, c := range counts {
-		if c == 0 {
-			t.Errorf("worker %d received no events", w)
-		}
+		require.NotZero(t, c, "worker %d received no events", w)
 	}
 }
 
-func TestSeqHandler_ConcurrentHandleCalls(t *testing.T) {
+// Expectation: Concurrent Handle calls should not lose any events.
+func Test_SeqHandler_Handle_ConcurrentCalls_NoLostEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -538,12 +501,11 @@ func TestSeqHandler_ConcurrentHandleCalls(t *testing.T) {
 	}
 
 	expected := goroutines * perGoroutine
-	if total != expected {
-		t.Errorf("expected %d events, got %d", expected, total)
-	}
+	require.Equal(t, expected, total)
 }
 
-func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
+// Expectation: Concurrent WithAttrs, WithGroup, and Handle calls should not lose events.
+func Test_SeqHandler_Handle_ConcurrentWithAttrsAndHandle_NoLostEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -557,7 +519,6 @@ func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	// Goroutine 1: log with base logger
 	go func() {
 		defer wg.Done()
 		for i := range 50 {
@@ -565,7 +526,6 @@ func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
 		}
 	}()
 
-	// Goroutine 2: derive with WithAttrs and log
 	go func() {
 		defer wg.Done()
 		l := logger.With("service", "svc")
@@ -574,7 +534,6 @@ func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
 		}
 	}()
 
-	// Goroutine 3: derive with WithGroup and log
 	go func() {
 		defer wg.Done()
 		l := logger.WithGroup("g").With("k", "v")
@@ -598,79 +557,11 @@ func TestSeqHandler_ConcurrentWithAttrsAndHandle(t *testing.T) {
 	next:
 	}
 
-	if total != 150 {
-		t.Errorf("expected 150 events, got %d", total)
-	}
+	require.Equal(t, 150, total)
 }
 
-func TestSeqHandler_HandleAfterClose(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-		withNoFlush(),
-	)
-
-	_ = handler.Close()
-
-	// Should not panic
-	logger := slog.New(handler)
-	logger.Info("after close", "key", "value")
-}
-
-func TestSeqHandler_DoubleClose(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-	)
-
-	if err := handler.Close(); err != nil {
-		t.Errorf("first Close returned error: %v", err)
-	}
-	if err := handler.Close(); err != nil {
-		t.Errorf("second Close returned error: %v", err)
-	}
-}
-
-func TestSeqHandler_BlockingCloseUnblocksSenders(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-		WithNonBlocking(false),
-		withNoFlush(),
-	)
-
-	logger := slog.New(handler)
-
-	// Fill the channel
-	for range maxWorkerEventBacklog {
-		logger.Info("fill")
-	}
-
-	// Start a goroutine that will block on send
-	done := make(chan struct{})
-	go func() {
-		logger.Info("blocked")
-		close(done)
-	}()
-
-	// Give it a moment to block
-	time.Sleep(10 * time.Millisecond)
-
-	// Close should unblock the sender
-	_ = handler.Close()
-
-	select {
-	case <-done:
-		// success - sender was unblocked
-	case <-time.After(2 * time.Second):
-		t.Error("blocked sender was not unblocked by Close")
-	}
-}
-
-func TestSeqHandler_NonBlockingDropsOnFullChannel(t *testing.T) {
+// Expectation: Non-blocking mode should drop events when the channel is full.
+func Test_SeqHandler_Handle_NonBlocking_DropsOnFullChannel_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -682,12 +573,10 @@ func TestSeqHandler_NonBlockingDropsOnFullChannel(t *testing.T) {
 
 	logger := slog.New(handler)
 
-	// Fill the channel beyond capacity
 	for i := range maxWorkerEventBacklog + 500 {
 		logger.Info("flood", "i", i)
 	}
 
-	// Drain and count
 	count := 0
 	for {
 		select {
@@ -699,10 +588,133 @@ func TestSeqHandler_NonBlockingDropsOnFullChannel(t *testing.T) {
 	}
 done:
 
-	if count > maxWorkerEventBacklog {
-		t.Errorf("expected at most %d events, got %d", maxWorkerEventBacklog, count)
+	require.LessOrEqual(t, count, maxWorkerEventBacklog)
+	require.NotZero(t, count, "expected some events to be received")
+}
+
+// Expectation: Close should complete without error.
+func Test_SeqHandler_Close_NoError_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithAPIKey(""),
+		WithBatchSize(10),
+		WithFlushInterval(5*time.Second),
+	)
+
+	err := handler.Close()
+
+	require.NoError(t, err)
+}
+
+// Expectation: Calling Close twice should not return an error.
+func Test_SeqHandler_Close_DoubleClose_NoError_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+	)
+
+	err := handler.Close()
+	require.NoError(t, err, "first Close returned error")
+
+	err = handler.Close()
+	require.NoError(t, err, "second Close returned error")
+}
+
+// Expectation: Logging after Close should not panic.
+func Test_SeqHandler_Close_LogAfterClose_NoPanic_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		withNoFlush(),
+	)
+
+	_ = handler.Close()
+
+	logger := slog.New(handler)
+	require.NotPanics(t, func() {
+		logger.Info("after close", "key", "value")
+	})
+}
+
+// Expectation: Close should unblock senders that are blocked on a full channel.
+func Test_SeqHandler_Close_BlockingClose_UnblocksSenders_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		WithWorkers(1),
+		WithNonBlocking(false),
+		withNoFlush(),
+	)
+
+	logger := slog.New(handler)
+
+	for range maxWorkerEventBacklog {
+		logger.Info("fill")
 	}
-	if count == 0 {
-		t.Error("expected some events to be received")
+
+	done := make(chan struct{})
+	go func() {
+		logger.Info("blocked")
+		close(done)
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+
+	_ = handler.Close()
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked sender was not unblocked by Close")
+	}
+}
+
+// Expectation: The function should return the correct Seq level string for each slog level.
+func Test_convertLevel_Table(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		in       slog.Level
+		expected string
+	}{
+		{
+			name:     "debug",
+			in:       slog.LevelDebug,
+			expected: "Debug",
+		},
+		{
+			name:     "info",
+			in:       slog.LevelInfo,
+			expected: "Information",
+		},
+		{
+			name:     "warn",
+			in:       slog.LevelWarn,
+			expected: "Warning",
+		},
+		{
+			name:     "error",
+			in:       slog.LevelError,
+			expected: "Error",
+		},
+		{
+			name:     "unknown level defaults to information",
+			in:       slog.Level(42),
+			expected: "Information",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := convertLevel(tt.in)
+			require.Equal(t, tt.expected, got)
+		})
 	}
 }

@@ -5,13 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
-func TestOnEnd_WithException(t *testing.T) {
+// Expectation: An event with exception.message should overwrite the event name and set the level to error.
+func Test_LoggingSpanProcessor_OnEnd_WithException_SetsErrorLevel_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -19,17 +21,14 @@ func TestOnEnd_WithException(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
 	processor := &LoggingSpanProcessor{Handler: handler}
 
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(processor))
-	// Ensure spans are processed before the test exits.
 	defer func() { _ = tp.Shutdown(context.Background()) }()
-
-	// Obtain a tracer from the provider.
 	tracer := tp.Tracer("test-tracer")
 
 	// Start a span, add an event with exception attributes, then end the span.
@@ -49,23 +48,16 @@ func TestOnEnd_WithException(t *testing.T) {
 		t.Fatal("timed out waiting for event")
 	}
 
-	// Check that the exception message overwrote the event's original name.
-	if evt.Message != "error occurred" {
-		t.Errorf("expected message 'error occurred', got %s", evt.Message)
-	}
-	// Check that the level was set to error.
-	if evt.Level != CLEFLevelError.String() {
-		t.Errorf("expected level %s, got %s", CLEFLevelError.String(), evt.Level)
-	}
-	// Check that additional properties (like code) are present.
-	if code, ok := evt.Properties["code"]; !ok {
-		t.Errorf("expected property 'code' to be set")
-	} else if code.(int64) != 500 {
-		t.Errorf("expected code 500, got %v", code)
-	}
+	require.Equal(t, "error occurred", evt.Message)
+	require.Equal(t, CLEFLevelError.String(), evt.Level)
+
+	code, ok := evt.Properties["code"]
+	require.True(t, ok, "expected property 'code' to be set")
+	require.Equal(t, int64(500), code.(int64))
 }
 
-func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
+// Expectation: Resource attributes should be propagated to all emitted CLEF events.
+func Test_LoggingSpanProcessor_OnEnd_PropagatesResourceAttributes_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
@@ -73,7 +65,7 @@ func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(), // No flushing for this test.
+		withNoFlush(),
 	)
 	defer handler.Close()
 
@@ -106,11 +98,7 @@ func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
 	}
 
 	for _, evt := range events {
-		if evt.ResourceAttributes["service.name"] != "testsvc" {
-			t.Errorf("expected @ra service.name=testsvc, got %v", evt.ResourceAttributes["service.name"])
-		}
-		if evt.ResourceAttributes["service.version"] != "1.2.3" {
-			t.Errorf("expected @ra service.version=1.2.3, got %v", evt.ResourceAttributes["service.version"])
-		}
+		require.Equal(t, "testsvc", evt.ResourceAttributes["service.name"])
+		require.Equal(t, "1.2.3", evt.ResourceAttributes["service.version"])
 	}
 }

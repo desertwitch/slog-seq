@@ -1,7 +1,7 @@
 >[!NOTE]
 > This is a fork of `sokkalf/slog-seq` with my personal [patches](https://github.com/sokkalf/slog-seq/compare/master...desertwitch:slog-seq:master).  
 > Feel free to use it, or the upstream, whichever suits your needs best.  
-> At the time of writing this fork is drop-in compatible with the upstream.
+> It is maintained for my personal needs and not to compete with upstream.
 
 <div>
     <a href="https://github.com/desertwitch/slog-seq/tags"><img alt="Release" src="https://img.shields.io/github/tag/desertwitch/slog-seq.svg"></a>
