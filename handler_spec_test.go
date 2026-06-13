@@ -67,6 +67,15 @@ func TestSlogtest(t *testing.T) {
 			for k, v := range m {
 				switch k {
 				case "@t":
+					// Slog specification expects zero times to be omitted, but
+					// CLEF specification requires even zero timestamps be sent.
+					// We do this little dance to satisfy the slog test suite...
+					if s, ok := v.(string); ok {
+						t, err := time.Parse(time.RFC3339Nano, s)
+						if err == nil && t.IsZero() {
+							break // Omit it for this test.
+						}
+					}
 					parsed["time"] = v
 				case "@m":
 					parsed["msg"] = v
