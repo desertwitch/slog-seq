@@ -51,9 +51,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 			}
 
 		case <-ticker.C:
-			if len(events) > 0 {
-				h.flushCurrentBatch(w, &events)
-			}
+			h.flushCurrentBatch(w, &events)
 
 		case <-w.purgeTicker.C:
 			// Purge events older than 5 minutes from retry buffer
