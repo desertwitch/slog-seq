@@ -78,7 +78,7 @@ func TestOnEnd_PropagatesResourceAttributes(t *testing.T) {
 
 	// One event emitted from AddEvent, one from span end.
 	var events []CLEFEvent
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		select {
 		case e := <-handler.workers[0].eventsCh:
 			events = append(events, e)

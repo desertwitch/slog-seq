@@ -11,6 +11,14 @@ import (
 	"time"
 )
 
+const (
+	maxIdleConns          = 100
+	dialTimeout           = 10 * time.Second
+	idleConnTimeout       = 90 * time.Second
+	tlsHandShakeTimeout   = 10 * time.Second
+	expectContinueTimeout = 10 * time.Second
+)
+
 func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
@@ -20,7 +28,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 	ticker := time.NewTicker(h.flushInterval)
 	defer ticker.Stop()
 
-	purgeInterval := h.flushInterval * 60
+	purgeInterval := h.flushInterval * 60 //nolint:mnd
 	w.purgeTicker = time.NewTicker(purgeInterval)
 	defer w.purgeTicker.Stop()
 
@@ -124,19 +132,21 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
 		}
 	}
 
-	req, err := http.NewRequest("POST", h.seqURL, strings.NewReader(sb.String()))
+	req, err := http.NewRequest(http.MethodPost, h.seqURL, strings.NewReader(sb.String())) //nolint:noctx
 	if err != nil {
 		h.errorHandlerFunc(err)
+
 		return false
 	}
 	req.Header.Set("Content-Type", "application/vnd.serilog.clef")
 	if h.apiKey != "" {
-		req.Header.Set("X-Seq-ApiKey", h.apiKey)
+		req.Header.Set("X-Seq-ApiKey", h.apiKey) //nolint:canonicalheader
 	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {
 		h.errorHandlerFunc(err)
+
 		return false
 	}
 	defer resp.Body.Close()
@@ -145,11 +155,13 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) bool {
 		// The event batch is too large to send to the Seq server.
 		// Drop the entire batch and log an error.
 		h.errorHandlerFunc(fmt.Errorf("dropping event; size exceeds Seq server limit, batch size: %d", len(events)))
+
 		return true
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		h.errorHandlerFunc(fmt.Errorf("Seq server returned status code %d", resp.StatusCode))
+		h.errorHandlerFunc(fmt.Errorf("seq server returned status code %d", resp.StatusCode))
+
 		return false
 	}
 
@@ -187,20 +199,20 @@ func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
 	w.retryBuffer = newBuf
 }
 
-func newHttpClient(skipVerify bool) *http.Client {
+func newHTTPClient(skipVerify bool) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
-				Timeout: 10 * time.Second,
+				Timeout: dialTimeout,
 			}).DialContext,
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: skipVerify,
+				InsecureSkipVerify: skipVerify, //nolint:gosec
 			},
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 10 * time.Second,
+			MaxIdleConns:          maxIdleConns,
+			IdleConnTimeout:       idleConnTimeout,
+			TLSHandshakeTimeout:   tlsHandShakeTimeout,
+			ExpectContinueTimeout: expectContinueTimeout,
 		},
 	}
 }

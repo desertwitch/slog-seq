@@ -5,14 +5,23 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"slices"
-
 	"go.opentelemetry.io/otel/trace"
+)
+
+const (
+	defaultBatchSize       = 50
+	defaultFlushInterval   = 2 * time.Second
+	defaultWorkerCount     = 1
+	defaultSendBlocking    = false
+	defaultDisableFlushing = false
+
+	maxWorkerEventBacklog = 1000
 )
 
 type worker struct {
@@ -65,11 +74,11 @@ func newSeqHandler(seqURL string) *SeqHandler {
 			closeCh: make(chan struct{}),
 
 			// sane defaults
-			batchSize:     50,
-			flushInterval: 2 * time.Second,
-			workerCount:   1,
-			nonBlocking:   true,
-			noFlush:       false,
+			batchSize:     defaultBatchSize,
+			flushInterval: defaultFlushInterval,
+			workerCount:   defaultWorkerCount,
+			nonBlocking:   !defaultSendBlocking,
+			noFlush:       defaultDisableFlushing,
 		},
 
 		sourceKey: slog.SourceKey,
@@ -81,10 +90,10 @@ func newSeqHandler(seqURL string) *SeqHandler {
 
 func (h *SeqHandler) start() {
 	if h.client == nil {
-		h.client = newHttpClient(h.disableTLSVerify)
+		h.client = newHTTPClient(h.disableTLSVerify)
 	}
 	if h.errorHandlerFunc == nil {
-		h.errorHandlerFunc = func(err error) {
+		h.errorHandlerFunc = func(_ error) {
 			// by default we do nothing
 		}
 	}
@@ -93,7 +102,7 @@ func (h *SeqHandler) start() {
 
 	// Start background workers
 	for i := range h.workerCount {
-		h.workers[i].eventsCh = make(chan CLEFEvent, 1000)
+		h.workers[i].eventsCh = make(chan CLEFEvent, maxWorkerEventBacklog)
 
 		h.workerWg.Add(1)
 		go h.runBackgroundFlusher(&h.workers[i])
@@ -131,7 +140,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	})
 
 	// split multi-line messages into a message (first line) and 'exception' (rest)
-	msg := strings.SplitN(r.Message, "\n", 2)
+	msg := strings.SplitN(r.Message, "\n", 2) //nolint:mnd
 
 	var exception string
 	if len(msg) == 1 {
@@ -167,7 +176,7 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 		return
 	}
 
-	idx := h.next.Add(1) % uint32(len(h.workers))
+	idx := h.next.Add(1) % uint32(len(h.workers)) //nolint:gosec
 	if h.nonBlocking {
 		// send to channel, drop if full
 		select {
@@ -187,7 +196,7 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	}
 }
 
-func (h *SeqHandler) Enabled(ctx context.Context, l slog.Level) bool {
+func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	if h.options.Level != nil {
 		return l >= h.options.Level.Level()
 	}
@@ -297,7 +306,7 @@ func (h *SeqHandler) addAttr(dst map[string]any, a slog.Attr) {
 		return
 	}
 
-	switch a.Value.Kind() {
+	switch a.Value.Kind() { //nolint:exhaustive
 	case slog.KindGroup:
 		groupMap, ok := dst[a.Key].(map[string]any)
 		if !ok {

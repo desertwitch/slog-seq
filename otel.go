@@ -13,7 +13,7 @@ type LoggingSpanProcessor struct {
 	Handler *SeqHandler
 }
 
-func (p *LoggingSpanProcessor) OnStart(ctx context.Context, s trace.ReadWriteSpan) {
+func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {
 	// noop
 }
 
@@ -27,15 +27,15 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	p.logOtelSpanAsCLEF(s)
 }
 
-func (p *LoggingSpanProcessor) ForceFlush(ctx context.Context) error {
+func (p *LoggingSpanProcessor) ForceFlush(_ context.Context) error {
 	return nil
 }
 
-func (p *LoggingSpanProcessor) Shutdown(ctx context.Context) error {
+func (p *LoggingSpanProcessor) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func (p *LoggingSpanProcessor) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
+func (p *LoggingSpanProcessor) ExportSpans(_ context.Context, spans []trace.ReadOnlySpan) error {
 	for _, s := range spans {
 		for _, e := range s.Events() {
 			p.logOtelEventAsCLEF(s, e)

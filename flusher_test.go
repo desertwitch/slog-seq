@@ -19,7 +19,7 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return m.RoundTripFunc(req)
 }
 
-func GetHttpClientMock(status int, msg string, f func()) *http.Client {
+func GetHTTPClientMock(status int, msg string, f func()) *http.Client {
 	f()
 	transport := &mockTransport{
 		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
@@ -29,6 +29,7 @@ func GetHttpClientMock(status int, msg string, f func()) *http.Client {
 			}, nil
 		},
 	}
+
 	return &http.Client{Transport: transport}
 }
 
@@ -36,7 +37,7 @@ func TestRunBackgroundFlusher_BasicFlushOnBatchSize(t *testing.T) {
 	// Create a SeqHandler with small batchSize for easy testing.
 	handler := &SeqHandler{
 		shared: &shared{
-			client:        GetHttpClientMock(200, "ok", func() {}),
+			client:        GetHTTPClientMock(200, "ok", func() {}),
 			seqURL:        "http://example.com",
 			flushInterval: 100 * time.Hour, // large interval so it won't trigger unless forced
 			batchSize:     2,               // flush after 2 events
@@ -87,7 +88,7 @@ func TestRunBackgroundFlusher_FlushOnInterval(t *testing.T) {
 
 	handler := &SeqHandler{
 		shared: &shared{
-			client:        GetHttpClientMock(200, "ok", func() { callCount++ }),
+			client:        GetHTTPClientMock(200, "ok", func() { callCount++ }),
 			seqURL:        "http://example.com",
 			flushInterval: flushInterval,
 			batchSize:     10, // large batchSize so it won't flush except on interval
@@ -125,8 +126,8 @@ func TestRunBackgroundFlusher_RetryOnFailure(t *testing.T) {
 
 	attempts := 0
 
-	successClient := GetHttpClientMock(200, "ok", func() { attempts++ })
-	failClient := GetHttpClientMock(500, "internal error", func() { attempts++ })
+	successClient := GetHTTPClientMock(200, "ok", func() { attempts++ })
+	failClient := GetHTTPClientMock(500, "internal error", func() { attempts++ })
 
 	handler := &SeqHandler{
 		shared: &shared{

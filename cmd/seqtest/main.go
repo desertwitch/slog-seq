@@ -1,7 +1,9 @@
+//nolint:mnd,sloglint
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -23,12 +25,13 @@ func main() {
 	flag.Parse()
 	if flag.NFlag() == 0 {
 		flag.PrintDefaults()
+
 		return
 	}
 	opts := &slog.HandlerOptions{
 		Level:     slog.LevelDebug,
 		AddSource: true,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == "password" {
 				a.Value = slog.StringValue("*****")
 			}
@@ -39,6 +42,7 @@ func main() {
 					s.File = path.Base(s.File)
 				}
 			}
+
 			return a
 		},
 	}
@@ -62,7 +66,7 @@ func main() {
 	// gosource is overwritten by the AddSource option
 	slog.Warn("This is a warning message", "huba", "fjall", "gosource", "notreallysource")
 
-	multiLineMessage := fmt.Sprintf("This is a multi-line message\n\nYep.\n\nWoo hoo.\nYea. It is.\n\n")
+	multiLineMessage := "This is a multi-line message\n\nYep.\n\nWoo hoo.\nYea. It is.\n\n"
 
 	slog.Info(multiLineMessage, "huba", "fjall")
 
@@ -90,7 +94,7 @@ func main() {
 	slog.InfoContext(spanCtx, "All done!")
 	span.End()
 
-	errorTest := fmt.Errorf("This is an error: %w", fmt.Errorf("This is the cause"))
+	errorTest := fmt.Errorf("this is an error: %w", errors.New("this is the cause"))
 	slog.Error("This is an error message", "huba", "fjall", "error", errorTest)
 
 	slog.New(handler).WithGroup("s").LogAttrs(ctx, slog.LevelDebug, "huba", slog.Int("a", 1), slog.Int("b", 2))

@@ -8,7 +8,7 @@ import (
 
 // SeqOption is an option to configure a Seq handler.
 type SeqOption interface {
-	apply(*SeqHandler) *SeqHandler
+	apply(handler *SeqHandler) *SeqHandler
 }
 
 type seqOptionFunc func(*SeqHandler) *SeqHandler
@@ -25,6 +25,7 @@ func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
 		handler = opt.apply(handler)
 	}
 	handler.start()
+
 	return slog.New(handler), handler
 }
 
@@ -32,6 +33,7 @@ func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
 func WithAPIKey(apiKey string) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.apiKey = apiKey
+
 		return h
 	})
 }
@@ -40,6 +42,7 @@ func WithAPIKey(apiKey string) SeqOption {
 func WithBatchSize(batchSize int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.batchSize = batchSize
+
 		return h
 	})
 }
@@ -48,6 +51,7 @@ func WithBatchSize(batchSize int) SeqOption {
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.flushInterval = flushInterval
+
 		return h
 	})
 }
@@ -56,6 +60,7 @@ func WithFlushInterval(flushInterval time.Duration) SeqOption {
 func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.options = *opts
+
 		return h
 	})
 }
@@ -64,6 +69,7 @@ func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 func WithInsecure() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.disableTLSVerify = true
+
 		return h
 	})
 }
@@ -72,6 +78,7 @@ func WithInsecure() SeqOption {
 func WithHTTPClient(client *http.Client) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.client = client
+
 		return h
 	})
 }
@@ -80,6 +87,7 @@ func WithHTTPClient(client *http.Client) SeqOption {
 func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.attrs = attrs
+
 		return h
 	})
 }
@@ -88,6 +96,7 @@ func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 func WithSourceKey(key string) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.sourceKey = key
+
 		return h
 	})
 }
@@ -97,6 +106,7 @@ func WithSourceKey(key string) SeqOption {
 func WithWorkers(count int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.workerCount = count
+
 		return h
 	})
 }
@@ -106,6 +116,7 @@ func WithWorkers(count int) SeqOption {
 func WithNonBlocking(nonBlocking bool) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.nonBlocking = nonBlocking
+
 		return h
 	})
 }
@@ -113,6 +124,7 @@ func WithNonBlocking(nonBlocking bool) SeqOption {
 func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.errorHandlerFunc = fn
+
 		return h
 	})
 }

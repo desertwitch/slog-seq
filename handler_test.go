@@ -37,7 +37,7 @@ func TestNewSeqHandler(t *testing.T) {
 	}
 
 	// Clean up
-	handler.Close()
+	_ = handler.Close()
 }
 
 // TestSeqHandler_Handle checks that Handle() sends events with correct properties.
@@ -243,7 +243,7 @@ func TestSeqHandler_addSource(t *testing.T) {
 }
 
 // TestSeqHandler_grouping ensures that grouping works as expected.
-// test case from comments in slog.Handler
+// test case from comments in slog.Handler.
 func TestSeqHandler_grouping(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
@@ -273,6 +273,7 @@ func TestSeqHandler_replaceAttr(t *testing.T) {
 			if a.Key == "password" {
 				a.Value = slog.StringValue("*****")
 			}
+
 			return a
 		},
 	}
@@ -297,9 +298,9 @@ func TestSeqHandler_replaceAttr(t *testing.T) {
 		t.Errorf("Expected password=*****, got %v", event1.Properties["password"])
 	}
 
-	secret_info := event2.Properties["secret_info"].(map[string]any)
-	if secret_info["password"] != "*****" {
-		t.Errorf("Expected password=*****, got %v", secret_info["password"])
+	secretInfo := event2.Properties["secret_info"].(map[string]any)
+	if secretInfo["password"] != "*****" {
+		t.Errorf("Expected password=*****, got %v", secretInfo["password"])
 	}
 }
 
@@ -317,7 +318,6 @@ func (p payload) LogValue() slog.Value {
 }
 
 func TestSeqHandler_AnonymousGroup(t *testing.T) {
-
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 	)
