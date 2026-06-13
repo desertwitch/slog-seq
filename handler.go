@@ -64,12 +64,12 @@ func newSeqHandler(seqURL string) *SeqHandler {
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
 
-		// sane defaults
-		batchSize:     50,
-		flushInterval: 2 * time.Second,
-		workerCount:   1,
-		nonBlocking:   true,
-		noFlush:       false,
+			// sane defaults
+			batchSize:     50,
+			flushInterval: 2 * time.Second,
+			workerCount:   1,
+			nonBlocking:   true,
+			noFlush:       false,
 		},
 
 		sourceKey: slog.SourceKey,
@@ -114,26 +114,19 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		caller := runtime.CallersFrames([]uintptr{pc})
 		frame, _ := caller.Next()
 		source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
-		sourceAttr := slog.Any(h.sourceKey, &source)
-		r.AddAttrs(sourceAttr)
+
+		if a, ok := h.resolveAttr(slog.Any(h.sourceKey, &source)); ok {
+			h.addAttr(props, a)
+		}
 	}
+
 	h.addAttrs(props, h.attrs)
+
 	r.Attrs(func(a slog.Attr) bool {
-		if h.options.ReplaceAttr != nil {
-			a = h.options.ReplaceAttr(h.groups, a)
-			if a.Key == "" {
-				return true
-			}
+		if a, ok := h.resolveAttr(a); ok {
+			h.addAttr(props, a)
 		}
 
-		if len(h.groups) > 0 && a.Key != h.sourceKey {
-			a.Key = strings.Join(h.groups, ".") + "." + a.Key
-		}
-
-		if v, ok := a.Value.Any().(error); ok {
-			a.Value = slog.StringValue(v.Error())
-		}
-		h.addAttr(props, a)
 		return true
 	})
 
@@ -263,6 +256,25 @@ func (h *SeqHandler) Close() error {
 // SourceKey returns the key used when AddSource is enabled.
 func (h *SeqHandler) SourceKey() string {
 	return h.sourceKey
+}
+
+func (h *SeqHandler) resolveAttr(a slog.Attr) (slog.Attr, bool) {
+	if h.options.ReplaceAttr != nil {
+		a = h.options.ReplaceAttr(h.groups, a)
+		if a.Key == "" {
+			return a, false
+		}
+	}
+
+	if len(h.groups) > 0 && a.Key != h.sourceKey {
+		a.Key = strings.Join(h.groups, ".") + "." + a.Key
+	}
+
+	if v, ok := a.Value.Any().(error); ok {
+		a.Value = slog.StringValue(v.Error())
+	}
+
+	return a, true
 }
 
 func (h *SeqHandler) addAttrs(dst map[string]any, attrs []slog.Attr) {
