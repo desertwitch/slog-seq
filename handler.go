@@ -303,7 +303,7 @@ func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog
 			dst[a.Key] = groupMap
 		}
 
-		childGroups := append(groups, a.Key)
+		childGroups := append(groups, a.Key) //nolint:gocritic
 		for _, ga := range a.Value.Group() {
 			h.addResolvedAttr(groupMap, childGroups, ga)
 		}
