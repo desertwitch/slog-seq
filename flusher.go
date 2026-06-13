@@ -78,13 +78,13 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 }
 
 func encodeEvent(e CLEFEvent) map[string]any {
-	topLevel := map[string]any{
-		"@t": e.Timestamp.Format(time.RFC3339Nano),
-		"@m": e.Message,
-		"@l": e.Level,
-	}
-
+	topLevel := make(map[string]any, len(e.Properties)+10) //nolint:mnd
 	maps.Copy(topLevel, e.Properties)
+
+	// Set reserved CLEF keys after copying properties to ensure they aren't overwritten
+	topLevel["@t"] = e.Timestamp.Format(time.RFC3339Nano)
+	topLevel["@m"] = e.Message
+	topLevel["@l"] = e.Level
 
 	if e.Exception != "" {
 		topLevel["@x"] = e.Exception
