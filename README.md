@@ -5,7 +5,7 @@
 
 <div>
     <a href="https://github.com/desertwitch/slog-seq/tags"><img alt="Release" src="https://img.shields.io/github/tag/desertwitch/slog-seq.svg"></a>
-    <a href="https://go.dev/"><img alt="Go Version" src="https://img.shields.io/badge/Go-%3E%3D%201.24.0-%23007d9c"></a>
+    <a href="https://go.dev/"><img alt="Go Version" src="https://img.shields.io/badge/Go-%3E%3D%201.25.0-%23007d9c"></a>
     <a href="https://pkg.go.dev/github.com/desertwitch/slog-seq"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/desertwitch/slog-seq.svg"></a>
     <a href="https://goreportcard.com/report/github.com/desertwitch/slog-seq"><img alt="Go Report" src="https://goreportcard.com/badge/github.com/desertwitch/slog-seq"></a>
     <a href="./LICENSE"><img alt="License" src="https://img.shields.io/github/license/desertwitch/slog-seq"></a>
