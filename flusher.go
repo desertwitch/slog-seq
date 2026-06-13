@@ -84,6 +84,8 @@ func encodeEvent(e CLEFEvent) map[string]any {
 		"@l": e.Level,
 	}
 
+	maps.Copy(topLevel, e.Properties)
+
 	if e.Exception != "" {
 		topLevel["@x"] = e.Exception
 	}
@@ -105,8 +107,6 @@ func encodeEvent(e CLEFEvent) map[string]any {
 	if e.SpanKind != "" {
 		topLevel["@sk"] = e.SpanKind
 	}
-
-	maps.Copy(topLevel, e.Properties)
 
 	return topLevel
 }
