@@ -10,7 +10,7 @@ import (
 	"path"
 	"time"
 
-	slogseq "github.com/sokkalf/slog-seq" // import your library
+	slogseq "github.com/desertwitch/slog-seq"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace"
 	tr "go.opentelemetry.io/otel/trace"
