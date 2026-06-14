@@ -11,14 +11,13 @@ import (
 )
 
 var _ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
+var _ trace.SpanExporter = (*LoggingSpanProcessor)(nil)
 
 type LoggingSpanProcessor struct {
 	Handler *SeqHandler
 }
 
-func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {
-	// noop
-}
+func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {}
 
 func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	events := s.Events()
@@ -30,10 +29,14 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	p.logOtelSpanAsCLEF(s)
 }
 
+// ForceFlush is a no-op. Events are flushed on the configured interval
+// and fully drained when the handler is closed.
 func (p *LoggingSpanProcessor) ForceFlush(_ context.Context) error {
 	return nil
 }
 
+// Shutdown is a no-op. The handler's lifecycle is managed by the caller
+// who created it, not by the span processor.
 func (p *LoggingSpanProcessor) Shutdown(_ context.Context) error {
 	return nil
 }
@@ -79,6 +82,8 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 
 	// Set level based on span status
 	status := span.Status()
+
+	event.Level = CLEFLevelInformation.String()
 	if status.Code == codes.Error {
 		event.Level = CLEFLevelError.String()
 		if status.Description != "" {
@@ -99,6 +104,7 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	event := &CLEFEvent{
 		Timestamp:          e.Time,
 		Message:            e.Name,
+		Level:              CLEFLevelInformation.String(),
 		TraceID:            sc.TraceID().String(),
 		SpanID:             sc.SpanID().String(),
 		SpanStart:          span.StartTime(),
