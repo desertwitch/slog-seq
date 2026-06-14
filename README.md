@@ -17,9 +17,17 @@
 
 # slog-seq
 
-**slog-seq** is a library for sending logs to a [Seq](https://datalust.co/seq) server, as a handler for Go's structured logging [slog](https://go.dev/blog/slog).
+**slog-seq** is a library for sending logs to a [Seq](https://datalust.co/seq) server, as a handler for Go's structured logging [slog](https://go.dev/blog/slog). It also supports some trace functionality.
 
-It also supports some trace functionality.
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [HTTP client](#http-client)
+- [Multiple workers](#multiple-workers)
+- [Traces](#traces)
+- [Benchmarks](#benchmarks)
+- [A note on OpenTelemetry](#a-note-on-opentelemetry)
+- [License](#license)
+
 
 ## Installation
 
@@ -145,9 +153,7 @@ Run `make benchmark` for full results.
 
 This package includes optional OpenTelemetry support for forwarding spans to
 Seq. The OTel dependency is only used if you create a `LoggingSpanProcessor`. No
-telemetry is collected or sent anywhere unless you explicitly configure it. If
-you only use the `slog` handler, the OTel code is unused and stripped from your
-binary by the Go linker.
+telemetry is collected or sent anywhere unless you explicitly configure it.
 
 ## License
 
