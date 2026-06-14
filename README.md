@@ -129,6 +129,14 @@ HTTP delivery is asynchronous and batched, so it does not block the caller.
 
 Run `make benchmark` for full results.
 
+## A note on OpenTelemetry
+
+This package includes optional OpenTelemetry support for forwarding spans to
+Seq. The OTel dependency is only used if you create a `LoggingSpanProcessor`. No
+telemetry is collected or sent anywhere unless you explicitly configure it. If
+you only use the `slog` handler, the OTel code is unused and stripped from your
+binary by the Go linker.
+
 ## License
 
 MIT
