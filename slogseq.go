@@ -43,6 +43,10 @@ func WithAPIKey(apiKey string) SeqOption {
 // WithBatchSize sets the number of events to batch before sending to Seq.
 func WithBatchSize(batchSize int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if batchSize < 1 {
+			batchSize = defaultBatchSize
+		}
+
 		h.batchSize = batchSize
 
 		return h
@@ -52,6 +56,10 @@ func WithBatchSize(batchSize int) SeqOption {
 // WithFlushInterval sets the interval at which to flush the batch.
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if flushInterval <= 0 {
+			flushInterval = defaultFlushInterval
+		}
+
 		h.flushInterval = flushInterval
 
 		return h
