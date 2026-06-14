@@ -125,6 +125,9 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 			event.Level = CLEFLevelError.String()
 			event.Message = fmt.Sprint(v)
 		}
+		if k == "exception.stacktrace" {
+			event.Exception = fmt.Sprint(v)
+		}
 	}
 
 	p.Handler.HandleCLEFEvent(*event)
