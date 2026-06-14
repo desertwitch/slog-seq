@@ -10,8 +10,10 @@ import (
 	tr "go.opentelemetry.io/otel/trace"
 )
 
-var _ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
-var _ trace.SpanExporter = (*LoggingSpanProcessor)(nil)
+var (
+	_ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
+	_ trace.SpanExporter  = (*LoggingSpanProcessor)(nil)
+)
 
 type LoggingSpanProcessor struct {
 	Handler *SeqHandler
@@ -110,7 +112,7 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		SpanStart:          span.StartTime(),
 		SpanKind:           spanKind,
 		ResourceAttributes: resourceAttrs(span),
-		Properties:         map[string]any{"SpanName": span.Name()},
+		Properties:         map[string]any{"SpanName": span.Name(), "EventName": e.Name},
 	}
 
 	if parent := span.Parent(); parent.IsValid() {
@@ -165,6 +167,10 @@ func dottedToNested(props map[string]any) map[string]any {
 }
 
 func addNested(dst map[string]any, path []string, val any) {
+	if len(path) == 0 {
+		return
+	}
+
 	if len(path) == 1 {
 		dst[path[0]] = val
 
