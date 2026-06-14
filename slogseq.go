@@ -88,8 +88,15 @@ func WithHTTPClient(client *http.Client) SeqOption {
 // WithGlobalAttrs sets the global attributes to include in all events.
 func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		resolved := make([]slog.Attr, len(attrs))
+
+		for i, a := range attrs {
+			a.Value = a.Value.Resolve()
+			resolved[i] = a
+		}
+
 		h.handlerAttrs = append(h.handlerAttrs, attrSet{
-			attrs: attrs,
+			attrs: resolved,
 		})
 
 		return h
