@@ -108,6 +108,27 @@ span.End()
 
 ![Seq with traces](./doc/seq_screenshot.png)
 
+## Benchmarks
+
+Benchmarks measure the hot path (log call through channel send).  
+HTTP delivery is asynchronous and batched, so it does not block the caller.
+
+**Measured using:** Go 1.26, Intel Core i5-12600K, 8-core VM.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| Handle | 90 | 162 | 2 |
+| Handle (parallel) | 189 | 447 | 6 |
+| Handle + WithAttrs | 386 | 775 | 12 |
+| Handle + WithGroups | 447 | 1021 | 10 |
+| Handle + AddSource | 426 | 996 | 9 |
+| Handle + ReplaceAttr | 348 | 720 | 10 |
+| HandleCLEFEvent<sup>1</sup> | 30 | 35 | 0 |
+
+<sub>**1**: Raw event dispatch after Handle preprocessing or directly by OTel.</sub>
+
+Run `make benchmark` for full results.
+
 ## License
 
 MIT
