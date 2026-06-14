@@ -16,6 +16,7 @@ import (
 const (
 	defaultBatchSize       = 50
 	defaultFlushInterval   = 2 * time.Second
+	defaultPurgeUnsetAfter = 5 * time.Minute
 	defaultWorkerCount     = 1
 	defaultSendBlocking    = false
 	defaultDisableFlushing = false
@@ -31,6 +32,7 @@ type shared struct {
 	apiKey           string
 	batchSize        int
 	flushInterval    time.Duration
+	purgeUnsentAfter time.Duration
 	disableTLSVerify bool
 	workerCount      int
 	nonBlocking      bool
@@ -82,11 +84,12 @@ func newSeqHandler(seqURL string) *SeqHandler {
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
 
-			batchSize:     defaultBatchSize,
-			flushInterval: defaultFlushInterval,
-			workerCount:   defaultWorkerCount,
-			nonBlocking:   !defaultSendBlocking,
-			noFlush:       defaultDisableFlushing,
+			batchSize:        defaultBatchSize,
+			flushInterval:    defaultFlushInterval,
+			purgeUnsentAfter: defaultPurgeUnsetAfter,
+			workerCount:      defaultWorkerCount,
+			nonBlocking:      !defaultSendBlocking,
+			noFlush:          defaultDisableFlushing,
 		},
 
 		sourceKey: slog.SourceKey,

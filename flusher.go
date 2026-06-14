@@ -55,7 +55,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 
 		case <-w.purgeTicker.C:
 			// Purge events older than 5 minutes from retry buffer
-			cutoff := time.Now().Add(-5 * time.Minute)
+			cutoff := time.Now().Add(-h.purgeUnsentAfter)
 			h.purgeOldEvents(w, cutoff)
 		}
 	}
