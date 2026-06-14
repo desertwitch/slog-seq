@@ -3,19 +3,23 @@ package slogseq
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/trace"
 	tr "go.opentelemetry.io/otel/trace"
 )
 
+var (
+	_ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
+	_ trace.SpanExporter  = (*LoggingSpanProcessor)(nil)
+)
+
 type LoggingSpanProcessor struct {
 	Handler *SeqHandler
 }
 
-func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {
-	// noop
-}
+func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {}
 
 func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	events := s.Events()
@@ -27,10 +31,14 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	p.logOtelSpanAsCLEF(s)
 }
 
+// ForceFlush is a no-op. Events are flushed on the configured interval
+// and fully drained when the handler is closed.
 func (p *LoggingSpanProcessor) ForceFlush(_ context.Context) error {
 	return nil
 }
 
+// Shutdown is a no-op. The handler's lifecycle is managed by the caller
+// who created it, not by the span processor.
 func (p *LoggingSpanProcessor) Shutdown(_ context.Context) error {
 	return nil
 }
@@ -76,6 +84,8 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 
 	// Set level based on span status
 	status := span.Status()
+
+	event.Level = CLEFLevelInformation.String()
 	if status.Code == codes.Error {
 		event.Level = CLEFLevelError.String()
 		if status.Description != "" {
@@ -96,12 +106,13 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	event := &CLEFEvent{
 		Timestamp:          e.Time,
 		Message:            e.Name,
+		Level:              CLEFLevelInformation.String(),
 		TraceID:            sc.TraceID().String(),
 		SpanID:             sc.SpanID().String(),
 		SpanStart:          span.StartTime(),
 		SpanKind:           spanKind,
 		ResourceAttributes: resourceAttrs(span),
-		Properties:         map[string]any{"SpanName": span.Name()},
+		Properties:         map[string]any{"SpanName": span.Name(), "EventName": e.Name},
 	}
 
 	if parent := span.Parent(); parent.IsValid() {
@@ -115,6 +126,9 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		if k == "exception.message" {
 			event.Level = CLEFLevelError.String()
 			event.Message = fmt.Sprint(v)
+		}
+		if k == "exception.stacktrace" {
+			event.Exception = fmt.Sprint(v)
 		}
 	}
 
@@ -137,4 +151,38 @@ func resourceAttrs(span trace.ReadOnlySpan) map[string]any {
 	}
 
 	return out
+}
+
+// dottedToNested converts a flat map with dotted keys ("a.b.c") into a
+// nested map structure. Used for ResourceAttributes encoding.
+func dottedToNested(props map[string]any) map[string]any {
+	out := make(map[string]any, len(props))
+
+	for k, v := range props {
+		path := strings.Split(k, ".")
+		addNested(out, path, v)
+	}
+
+	return out
+}
+
+func addNested(dst map[string]any, path []string, val any) {
+	if len(path) == 0 {
+		return
+	}
+
+	if len(path) == 1 {
+		dst[path[0]] = val
+
+		return
+	}
+
+	head := path[0]
+	child, ok := dst[head].(map[string]any)
+	if !ok {
+		child = make(map[string]any)
+		dst[head] = child
+	}
+
+	addNested(child, path[1:], val)
 }

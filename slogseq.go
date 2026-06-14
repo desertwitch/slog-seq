@@ -21,9 +21,11 @@ func (f seqOptionFunc) apply(h *SeqHandler) *SeqHandler {
 // opts is a list of options to configure the Seq handler.
 func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
 	handler := newSeqHandler(seqURL)
+
 	for _, opt := range opts {
 		handler = opt.apply(handler)
 	}
+
 	handler.start()
 
 	return slog.New(handler), handler
@@ -41,6 +43,10 @@ func WithAPIKey(apiKey string) SeqOption {
 // WithBatchSize sets the number of events to batch before sending to Seq.
 func WithBatchSize(batchSize int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if batchSize < 1 {
+			batchSize = defaultBatchSize
+		}
+
 		h.batchSize = batchSize
 
 		return h
@@ -50,6 +56,10 @@ func WithBatchSize(batchSize int) SeqOption {
 // WithFlushInterval sets the interval at which to flush the batch.
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if flushInterval <= 0 {
+			flushInterval = defaultFlushInterval
+		}
+
 		h.flushInterval = flushInterval
 
 		return h
@@ -86,7 +96,16 @@ func WithHTTPClient(client *http.Client) SeqOption {
 // WithGlobalAttrs sets the global attributes to include in all events.
 func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		h.goas = append(h.goas, groupOrAttrs{attrs: attrs})
+		resolved := make([]slog.Attr, len(attrs))
+
+		for i, a := range attrs {
+			a.Value = a.Value.Resolve()
+			resolved[i] = a
+		}
+
+		h.handlerAttrs = append(h.handlerAttrs, attrSet{
+			attrs: resolved,
+		})
 
 		return h
 	})
@@ -125,6 +144,7 @@ func WithNonBlocking(nonBlocking bool) SeqOption {
 	})
 }
 
+// WithErrorHandlerFunc sets the error handler function.
 func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.errorHandlerFunc = fn
