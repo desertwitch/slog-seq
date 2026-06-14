@@ -68,6 +68,11 @@ type attrSet struct {
 	groups []string
 }
 
+// SeqHandler is an slog.Handler that sends structured log events to a Seq
+// server using the CLEF (Compact Log Event Format) protocol. It supports
+// batching, multiple workers, and asynchronous HTTP delivery.
+//
+// Create one using [NewLogger]. Do not construct directly.
 type SeqHandler struct {
 	*shared
 
@@ -118,6 +123,7 @@ func (h *SeqHandler) start() {
 	}
 }
 
+// Enabled reports whether the handler is configured to log at the given level.
 func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	if h.options.Level != nil {
 		return l >= h.options.Level.Level()
@@ -126,18 +132,21 @@ func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	return true
 }
 
-// SourceKey returns the key used when AddSource is enabled.
+// SourceKey returns the key used for source location information when AddSource
+// is enabled in the handler options.
 func (h *SeqHandler) SourceKey() string {
 	return h.sourceKey
 }
 
+// Handle processes a log record, converting it to a CLEF event and dispatching
+// it to a worker for asynchronous delivery to Seq.
 func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	levelString := convertLevel(r.Level)
 
 	props := make(map[string]any, r.NumAttrs()+2) //nolint:mnd
 
-	// Process handler (non-record) attrs from WithAttrs calls.
-	// Each entry carries its own groups snapshot for correct nesting.
+	// Process handler (non-record) attrs from WithAttrs calls. Each entry
+	// carries its own groups snapshot for correct nesting.
 	for i := range h.handlerAttrs {
 		ha := &h.handlerAttrs[i]
 		dst := nestInto(props, ha.groups)
@@ -193,6 +202,10 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 	return nil
 }
 
+// HandleCLEFEvent dispatches a pre-built CLEF event to a worker for
+// asynchronous delivery to Seq. This is the entry point used by
+// [LoggingSpanProcessor] and can be used for custom integrations that bypass
+// slog.
 func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -221,6 +234,9 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	}
 }
 
+// WithAttrs returns a new handler with the given attributes added to every
+// subsequent log event. The returned handler shares the same workers and
+// connection as the original.
 func (h *SeqHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	if len(attrs) == 0 {
 		return h // no-op
@@ -243,6 +259,9 @@ func (h *SeqHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &h2
 }
 
+// WithGroup returns a new handler that nests all subsequent attributes and
+// record attributes under the given group name. The returned handler shares the
+// same workers and connection as the original.
 func (h *SeqHandler) WithGroup(name string) slog.Handler {
 	if name == "" {
 		return h // no-op
@@ -256,6 +275,9 @@ func (h *SeqHandler) WithGroup(name string) slog.Handler {
 	return &h2
 }
 
+// Close shuts down the handler, draining all pending events and waiting for
+// workers to finish. It is safe to call multiple times. Logging after Close
+// will silently drop events.
 func (h *SeqHandler) Close() error {
 	h.closeOnce.Do(func() {
 		// Blocked senders hold read locks, so we release these first.

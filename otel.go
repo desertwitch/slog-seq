@@ -15,12 +15,23 @@ var (
 	_ trace.SpanExporter  = (*LoggingSpanProcessor)(nil)
 )
 
+// LoggingSpanProcessor is an OpenTelemetry [trace.SpanProcessor] and
+// [trace.SpanExporter] that converts completed spans and their events into CLEF
+// events and dispatches them to Seq via a [SeqHandler].
+//
+// Span events are emitted before the span itself to preserve chronological
+// ordering. The processor does not manage the handler's lifecycle - the caller
+// is responsible for closing the handler.
 type LoggingSpanProcessor struct {
 	Handler *SeqHandler
 }
 
+// OnStart is a no-op. This processor only acts on completed spans.
 func (p *LoggingSpanProcessor) OnStart(_ context.Context, _ trace.ReadWriteSpan) {}
 
+// OnEnd converts a completed span and its events into CLEF events and
+// dispatches them to the handler. Span events are emitted first, followed by
+// the span itself.
 func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	events := s.Events()
 
@@ -31,18 +42,21 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	p.logOtelSpanAsCLEF(s)
 }
 
-// ForceFlush is a no-op. Events are flushed on the configured interval
-// and fully drained when the handler is closed.
+// ForceFlush is a no-op. Events are flushed on the configured interval and
+// fully drained when the handler is closed.
 func (p *LoggingSpanProcessor) ForceFlush(_ context.Context) error {
 	return nil
 }
 
-// Shutdown is a no-op. The handler's lifecycle is managed by the caller
-// who created it, not by the span processor.
+// Shutdown is a no-op. The handler's lifecycle is managed by the caller who
+// created it, not by the span processor.
 func (p *LoggingSpanProcessor) Shutdown(_ context.Context) error {
 	return nil
 }
 
+// ExportSpans converts a batch of completed spans and their events into CLEF
+// events and dispatches them to the handler. This method satisfies the
+// [trace.SpanExporter] interface.
 func (p *LoggingSpanProcessor) ExportSpans(_ context.Context, spans []trace.ReadOnlySpan) error {
 	for _, s := range spans {
 		for _, e := range s.Events() {

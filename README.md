@@ -88,25 +88,66 @@ This can be useful if you have a high enough volume of logs to cause dropped mes
 Here is an example of how to use it:
 
 ```go
-spanProcessor := trace.NewSimpleSpanProcessor(&slogseq.LoggingSpanProcessor{Handler: handler})
-tp := trace.NewTracerProvider(trace.WithSpanProcessor(spanProcessor), trace.WithSampler(trace.AlwaysSample()))
+spanProcessor := trace.NewSimpleSpanProcessor(
+    &slogseq.LoggingSpanProcessor{Handler: handler},
+)
+
+tp := trace.NewTracerProvider(
+    trace.WithSpanProcessor(spanProcessor),
+    trace.WithSampler(trace.AlwaysSample()),
+)
+
 tracer := tp.Tracer("example-tracer")
-ctx := context.Background()
-spanCtx, span := tracer.Start(ctx, "operation")
+
+ctx, span := tracer.Start(context.Background(), "operation")
 span.AddEvent("Starting work")
 time.Sleep(500 * time.Millisecond)
-slog.InfoContext(spanCtx, "This is a span log message", "key", "value")
-spanCtx, subSpan := tracer.Start(spanCtx, "sub operation")
+
+slog.InfoContext(ctx, "This is a span log message", "key", "value")
+
+ctx, subSpan := tracer.Start(ctx, "sub operation")
 subSpan.AddEvent("Sub operation started")
 time.Sleep(500 * time.Millisecond)
-subSpan.AddEvent("Sub operation completed", tr.WithAttributes(attribute.String("key", "value")))
+subSpan.AddEvent("Sub operation completed",
+    tr.WithAttributes(attribute.String("key", "value")),
+)
 subSpan.End()
+
 span.AddEvent("Work done")
-slog.InfoContext(spanCtx, "All done!")
+slog.InfoContext(ctx, "All done!")
 span.End()
 ```
 
 ![Seq with traces](./doc/seq_screenshot.png)
+
+## Benchmarks
+
+Benchmarks measure the hot path (log call through channel send).  
+HTTP delivery is asynchronous and batched, so it does not block the caller.
+
+**Measured using:** Go 1.26, Intel Core i5-12600K, 8-core VM.
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| Handle | 90 | 162 | 2 |
+| Handle (parallel) | 189 | 447 | 6 |
+| Handle + WithAttrs | 386 | 775 | 12 |
+| Handle + WithGroups | 447 | 1021 | 10 |
+| Handle + AddSource | 426 | 996 | 9 |
+| Handle + ReplaceAttr | 348 | 720 | 10 |
+| HandleCLEFEvent<sup>1</sup> | 30 | 35 | 0 |
+
+<sub>**1**: Raw event dispatch after Handle preprocessing or directly by OTel.</sub>
+
+Run `make benchmark` for full results.
+
+## A note on OpenTelemetry
+
+This package includes optional OpenTelemetry support for forwarding spans to
+Seq. The OTel dependency is only used if you create a `LoggingSpanProcessor`. No
+telemetry is collected or sent anywhere unless you explicitly configure it. If
+you only use the `slog` handler, the OTel code is unused and stripped from your
+binary by the Go linker.
 
 ## License
 

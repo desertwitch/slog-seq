@@ -22,6 +22,25 @@ const (
 	requestTimeout        = 30 * time.Second
 )
 
+func newHTTPClient(skipVerify bool) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout: dialTimeout,
+			}).DialContext,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: skipVerify, //nolint:gosec
+			},
+			MaxIdleConns:          maxIdleConns,
+			IdleConnTimeout:       idleConnTimeout,
+			TLSHandshakeTimeout:   tlsHandShakeTimeout,
+			ExpectContinueTimeout: expectContinueTimeout,
+		},
+		Timeout: requestTimeout,
+	}
+}
+
 func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
@@ -75,6 +94,14 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 
 		*events = (*events)[:0]
 	}
+}
+
+func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
+	if len(events) == 0 {
+		return nil
+	}
+
+	return h.attemptSendBatch(events)
 }
 
 func encodeEvent(e CLEFEvent) map[string]any {
@@ -172,14 +199,6 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 	return nil
 }
 
-func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
-	if len(events) == 0 {
-		return nil
-	}
-
-	return h.attemptSendBatch(events)
-}
-
 func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
 	newBuf := w.retryBuffer[:0]
 
@@ -195,23 +214,4 @@ func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
 	}
 
 	w.retryBuffer = newBuf
-}
-
-func newHTTPClient(skipVerify bool) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout: dialTimeout,
-			}).DialContext,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: skipVerify, //nolint:gosec
-			},
-			MaxIdleConns:          maxIdleConns,
-			IdleConnTimeout:       idleConnTimeout,
-			TLSHandshakeTimeout:   tlsHandShakeTimeout,
-			ExpectContinueTimeout: expectContinueTimeout,
-		},
-		Timeout: requestTimeout,
-	}
 }

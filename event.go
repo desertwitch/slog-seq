@@ -2,33 +2,72 @@ package slogseq
 
 import "time"
 
-// CLEFEvent (for CLEF, Compact Log Event Format) is a JSON-based log event format that Seq uses.
-// https://clef-json.org
+// CLEFEvent represents a log event in CLEF (Compact Log Event Format), the
+// JSON-based format used by Seq. See https://clef-json.org for the
+// specification.
 type CLEFEvent struct {
-	Timestamp          time.Time      `json:"@t,omitzero"`
-	Message            string         `json:"@m,omitempty"`
-	Exception          string         `json:"@x,omitempty"`
-	Level              string         `json:"@l"`
-	Properties         map[string]any `json:"-"`
-	TraceID            string         `json:"@tr,omitempty"`
-	SpanID             string         `json:"@sp,omitempty"`
-	SpanStart          time.Time      `json:"@st,omitzero"`
-	SpanKind           string         `json:"@sk,omitempty"`
+	// Timestamp is the time the event occurred.
+	Timestamp time.Time `json:"@t,omitzero"`
+
+	// Message is the log message. For multi-line slog messages, this contains
+	// only the first line; the remainder goes into Exception.
+	Message string `json:"@m,omitempty"`
+
+	// Exception holds supplementary detail such as a stack trace or the
+	// continuation of a multi-line message.
+	Exception string `json:"@x,omitempty"`
+
+	// Level is the severity of the event (e.g. "Information", "Error").
+	Level string `json:"@l"`
+
+	// Properties holds structured key-value data attached to the event. These
+	// are serialized as top-level CLEF properties, not under a reserved key.
+	Properties map[string]any `json:"-"`
+
+	// TraceID is the OpenTelemetry trace identifier, if present.
+	TraceID string `json:"@tr,omitempty"`
+
+	// SpanID is the OpenTelemetry span identifier, if present.
+	SpanID string `json:"@sp,omitempty"`
+
+	// SpanStart is the start time of the span, if present.
+	SpanStart time.Time `json:"@st,omitzero"`
+
+	// SpanKind is the OpenTelemetry span kind (e.g. "server", "client").
+	SpanKind string `json:"@sk,omitempty"`
+
+	// ResourceAttributes holds OpenTelemetry resource attributes, encoded under
+	// the CLEF @ra key.
 	ResourceAttributes map[string]any `json:"@ra,omitempty,omitzero"`
-	ParentSpanID       string         `json:"@ps,omitempty"`
+
+	// ParentSpanID is the span identifier of the parent span, if present.
+	ParentSpanID string `json:"@ps,omitempty"`
 }
 
+// CLEFLevel represents a CLEF severity level as defined by the Seq server.
 type CLEFLevel string
 
 const (
-	CLEFLevelDebug       CLEFLevel = "Debug"
-	CLEFLevelVerbose     CLEFLevel = "Verbose"
+	// CLEFLevelDebug is the lowest standard severity level.
+	CLEFLevelDebug CLEFLevel = "Debug"
+
+	// CLEFLevelVerbose is between Debug and Information.
+	CLEFLevelVerbose CLEFLevel = "Verbose"
+
+	// CLEFLevelInformation is the default severity level.
 	CLEFLevelInformation CLEFLevel = "Information"
-	CLEFLevelWarning     CLEFLevel = "Warning"
-	CLEFLevelError       CLEFLevel = "Error"
-	CLEFLevelFatal       CLEFLevel = "Fatal"
+
+	// CLEFLevelWarning indicates a potential problem.
+	CLEFLevelWarning CLEFLevel = "Warning"
+
+	// CLEFLevelError indicates a failure.
+	CLEFLevelError CLEFLevel = "Error"
+
+	// CLEFLevelFatal indicates an unrecoverable failure.
+	CLEFLevelFatal CLEFLevel = "Fatal"
 )
 
+// String returns the CLEF level as a string.
 func (l CLEFLevel) String() string {
 	return string(l)
 }

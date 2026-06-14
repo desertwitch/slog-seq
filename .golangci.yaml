@@ -35,7 +35,6 @@ linters:
   exclusions:
     generated: lax
     presets:
-      - comments
       - common-false-positives
       - std-error-handling
     rules:
