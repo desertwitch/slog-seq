@@ -59,6 +59,7 @@ linters:
           - unparam
           - wrapcheck
           - forcetypeassert
+          - canonicalheader
       - path: testutil\.go
         linters:
           - dupl

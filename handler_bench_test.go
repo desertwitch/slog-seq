@@ -67,6 +67,57 @@ func BenchmarkHandle_Parallel(b *testing.B) {
 	})
 }
 
+func BenchmarkHandle_WithAttrs(b *testing.B) {
+	handler := benchmarkHandler(b)
+
+	handler = handler.WithAttrs([]slog.Attr{
+		slog.String("service", "api"),
+		slog.String("env", "prod"),
+		slog.String("version", "1.0"),
+	}).(*SeqHandler)
+
+	r := slog.NewRecord(
+		time.Now(),
+		slog.LevelInfo,
+		"hello",
+		0,
+	)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = handler.Handle(b.Context(), r)
+	}
+}
+
+func BenchmarkHandle_ManyAttrs(b *testing.B) {
+	handler := benchmarkHandler(b)
+
+	r := slog.NewRecord(
+		time.Now(),
+		slog.LevelInfo,
+		"hello",
+		0,
+	)
+
+	r.AddAttrs(
+		slog.String("k1", "v1"),
+		slog.String("k2", "v2"),
+		slog.String("k3", "v3"),
+		slog.String("k4", "v4"),
+		slog.String("k5", "v5"),
+		slog.String("k6", "v6"),
+		slog.String("k7", "v7"),
+		slog.String("k8", "v8"),
+		slog.String("k9", "v9"),
+		slog.String("k10", "v10"),
+	)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = handler.Handle(context.Background(), r)
+	}
+}
+
 func BenchmarkHandle_FlatAttrs(b *testing.B) {
 	handler := benchmarkHandler(b)
 
@@ -113,20 +164,48 @@ func BenchmarkHandle_DottedAttrs(b *testing.B) {
 	}
 }
 
-func BenchmarkHandle_WithAttrs(b *testing.B) {
+func BenchmarkHandle_ErrorAttr(b *testing.B) {
 	handler := benchmarkHandler(b)
 
-	handler = handler.WithAttrs([]slog.Attr{
-		slog.String("service", "api"),
-		slog.String("env", "prod"),
-		slog.String("version", "1.0"),
-	}).(*SeqHandler)
+	r := slog.NewRecord(
+		time.Now(),
+		slog.LevelError,
+		"request failed",
+		0,
+	)
+
+	r.AddAttrs(
+		slog.Any("err", errors.New("connection refused")),
+		slog.Int("status", 500),
+	)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = handler.Handle(b.Context(), r)
+	}
+}
+
+func BenchmarkHandle_ReplaceAttr(b *testing.B) {
+	handler := benchmarkHandler(b)
+
+	handler.options.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == "password" {
+			return slog.String("password", "***")
+		}
+
+		return a
+	}
 
 	r := slog.NewRecord(
 		time.Now(),
 		slog.LevelInfo,
 		"hello",
 		0,
+	)
+
+	r.AddAttrs(
+		slog.String("user", "bob"),
+		slog.String("password", "secret"),
 	)
 
 	b.ReportAllocs()
@@ -207,7 +286,50 @@ func BenchmarkHandle_DeepGroups(b *testing.B) {
 	}
 }
 
-func BenchmarkHandle_WithAttrsAndGroups(b *testing.B) {
+func BenchmarkHandle_AnonymousGroup(b *testing.B) {
+	handler := benchmarkHandler(b)
+
+	r := slog.NewRecord(
+		time.Now(),
+		slog.LevelInfo,
+		"hello",
+		0,
+	)
+
+	r.AddAttrs(
+		slog.Group("",
+			slog.String("inlined_a", "val1"),
+			slog.String("inlined_b", "val2"),
+			slog.Int("inlined_c", 42),
+		),
+	)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = handler.Handle(b.Context(), r)
+	}
+}
+
+func BenchmarkHandle_WithGroupNoAttrs(b *testing.B) {
+	handler := benchmarkHandler(b)
+
+	handler = handler.WithGroup("service").(*SeqHandler)
+	handler = handler.WithGroup("http").(*SeqHandler)
+
+	r := slog.NewRecord(
+		time.Now(),
+		slog.LevelInfo,
+		"hello",
+		0,
+	)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = handler.Handle(b.Context(), r)
+	}
+}
+
+func BenchmarkHandle_WithGroupsAndAttrs(b *testing.B) {
 	handler := benchmarkHandler(b)
 
 	handler = handler.WithGroup("service").(*SeqHandler)
@@ -290,83 +412,6 @@ func BenchmarkHandle_NestedSlogGroups(b *testing.B) {
 	}
 }
 
-func BenchmarkHandle_ManyAttrs(b *testing.B) {
-	handler := benchmarkHandler(b)
-
-	r := slog.NewRecord(
-		time.Now(),
-		slog.LevelInfo,
-		"hello",
-		0,
-	)
-
-	r.AddAttrs(
-		slog.String("k1", "v1"),
-		slog.String("k2", "v2"),
-		slog.String("k3", "v3"),
-		slog.String("k4", "v4"),
-		slog.String("k5", "v5"),
-		slog.String("k6", "v6"),
-		slog.String("k7", "v7"),
-		slog.String("k8", "v8"),
-		slog.String("k9", "v9"),
-		slog.String("k10", "v10"),
-	)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = handler.Handle(context.Background(), r)
-	}
-}
-
-func BenchmarkHandle_AddSource(b *testing.B) {
-	handler := benchmarkHandler(b)
-
-	handler.options.AddSource = true
-	pc, _, _, _ := runtime.Caller(0)
-
-	r := slog.NewRecord(
-		time.Now(),
-		slog.LevelInfo,
-		"hello",
-		pc,
-	)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = handler.Handle(b.Context(), r)
-	}
-}
-
-func BenchmarkHandle_ReplaceAttr(b *testing.B) {
-	handler := benchmarkHandler(b)
-
-	handler.options.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
-		if a.Key == "password" {
-			return slog.String("password", "***")
-		}
-
-		return a
-	}
-
-	r := slog.NewRecord(
-		time.Now(),
-		slog.LevelInfo,
-		"hello",
-		0,
-	)
-
-	r.AddAttrs(
-		slog.String("user", "bob"),
-		slog.String("password", "secret"),
-	)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = handler.Handle(b.Context(), r)
-	}
-}
-
 func BenchmarkHandle_MultilineMessage(b *testing.B) {
 	handler := benchmarkHandler(b)
 
@@ -383,62 +428,17 @@ func BenchmarkHandle_MultilineMessage(b *testing.B) {
 	}
 }
 
-func BenchmarkHandle_WithGroupNoAttrs(b *testing.B) {
+func BenchmarkHandle_AddSource(b *testing.B) {
 	handler := benchmarkHandler(b)
 
-	handler = handler.WithGroup("service").(*SeqHandler)
-	handler = handler.WithGroup("http").(*SeqHandler)
+	handler.options.AddSource = true
+	pc, _, _, _ := runtime.Caller(0)
 
 	r := slog.NewRecord(
 		time.Now(),
 		slog.LevelInfo,
 		"hello",
-		0,
-	)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = handler.Handle(b.Context(), r)
-	}
-}
-
-func BenchmarkHandle_ErrorAttr(b *testing.B) {
-	handler := benchmarkHandler(b)
-
-	r := slog.NewRecord(
-		time.Now(),
-		slog.LevelError,
-		"request failed",
-		0,
-	)
-
-	r.AddAttrs(
-		slog.Any("err", errors.New("connection refused")),
-		slog.Int("status", 500),
-	)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = handler.Handle(b.Context(), r)
-	}
-}
-
-func BenchmarkHandle_AnonymousGroup(b *testing.B) {
-	handler := benchmarkHandler(b)
-
-	r := slog.NewRecord(
-		time.Now(),
-		slog.LevelInfo,
-		"hello",
-		0,
-	)
-
-	r.AddAttrs(
-		slog.Group("",
-			slog.String("inlined_a", "val1"),
-			slog.String("inlined_b", "val2"),
-			slog.Int("inlined_c", 42),
-		),
+		pc,
 	)
 
 	b.ReportAllocs()
