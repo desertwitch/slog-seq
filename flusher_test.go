@@ -163,6 +163,7 @@ func Test_runBackgroundFlusher_RetryOnFailure_Success(t *testing.T) {
 			flushInterval:    100 * time.Hour,
 			batchSize:        2,
 			errorHandlerFunc: func(err error) {},
+			retryBufferSize:  10,
 		},
 	}
 
@@ -411,88 +412,6 @@ func Test_runBackgroundFlusher_BatchAccumulation_Success(t *testing.T) {
 	require.Equal(t, 5, batchSizes[0], "first batch should contain exactly batchSize events")
 }
 
-// Expectation: The purge ticker should purge old events from the retry buffer.
-func Test_runBackgroundFlusher_PurgeTicker_PurgesOldEvents_Success(t *testing.T) {
-	t.Parallel()
-
-	flushInterval := 5 * time.Millisecond
-
-	handler := &SeqHandler{
-		shared: &shared{
-			client:           GetHTTPClientMock(500, "error", func() {}),
-			seqURL:           "http://example.com",
-			flushInterval:    flushInterval,
-			batchSize:        1,
-			purgeUnsentAfter: 50 * time.Millisecond,
-			errorHandlerFunc: func(_ error) {},
-		},
-	}
-
-	w := &worker{
-		eventsCh: make(chan CLEFEvent, 10),
-	}
-
-	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
-
-	// Send an event that will fail and land in the retry buffer.
-	w.eventsCh <- CLEFEvent{
-		Message:   "will-be-purged",
-		Timestamp: time.Now().Add(-10 * time.Minute), // already old
-	}
-
-	// Wait for the flush to fail (event goes to retry buffer)
-	// and then for the purge ticker to fire and remove it.
-	time.Sleep(500 * time.Millisecond)
-
-	close(w.eventsCh)
-	handler.workerWg.Wait()
-
-	require.Empty(t, w.retryBuffer, "old event should have been purged by the purge ticker")
-}
-
-// Expectation: The purge ticker should keep recent events in the retry buffer.
-func Test_runBackgroundFlusher_PurgeTicker_KeepsRecentEvents_Success(t *testing.T) {
-	t.Parallel()
-
-	flushInterval := 5 * time.Millisecond
-
-	handler := &SeqHandler{
-		shared: &shared{
-			client:           GetHTTPClientMock(500, "error", func() {}),
-			seqURL:           "http://example.com",
-			flushInterval:    flushInterval,
-			batchSize:        1,
-			purgeUnsentAfter: 10 * time.Minute,
-			errorHandlerFunc: func(_ error) {},
-		},
-	}
-
-	w := &worker{
-		eventsCh: make(chan CLEFEvent, 10),
-	}
-
-	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
-
-	// Send an event with a recent timestamp - should survive purging.
-	w.eventsCh <- CLEFEvent{
-		Message:   "recent",
-		Timestamp: time.Now(),
-	}
-
-	// Wait for flush to fail and purge ticker to fire.
-	time.Sleep(500 * time.Millisecond)
-
-	close(w.eventsCh)
-	handler.workerWg.Wait()
-
-	// The event failed to send so it should still be in the retry buffer,
-	// and the purge ticker should not have removed it (purgeUnsentAfter is 10 minutes).
-	require.NotEmpty(t, w.retryBuffer, "recent event should not be purged")
-	require.Equal(t, "recent", w.retryBuffer[0].Message)
-}
-
 // Expectation: sendWithRetry with empty input should return nil.
 func Test_sendWithRetry_EmptyInput_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
@@ -656,6 +575,7 @@ func Test_flushCurrentBatch_FailedEvents_AccumulateInRetryBuffer_Success(t *test
 			client:           GetHTTPClientMock(500, "error", func() {}),
 			seqURL:           "http://example.com",
 			errorHandlerFunc: func(_ error) {},
+			retryBufferSize:  10,
 		},
 	}
 
@@ -706,6 +626,7 @@ func Test_flushCurrentBatch_RetryBufferFailAndCurrentFail_BothAccumulate_Success
 			client:           GetHTTPClientMock(500, "error", func() {}),
 			seqURL:           "http://example.com",
 			errorHandlerFunc: func(_ error) {},
+			retryBufferSize:  10,
 		},
 	}
 
@@ -722,6 +643,127 @@ func Test_flushCurrentBatch_RetryBufferFailAndCurrentFail_BothAccumulate_Success
 
 	require.Empty(t, events)
 	require.Len(t, w.retryBuffer, 2, "both failed retry and failed current should be in buffer")
+}
+
+// Expectation: flushCurrentBatch should cap the retry buffer at retryBufferSize.
+func Test_flushCurrentBatch_RetryBufferCapped_Success(t *testing.T) {
+	t.Parallel()
+
+	var errMsg string
+	handler := &SeqHandler{
+		shared: &shared{
+			client:           GetHTTPClientMock(500, "error", func() {}),
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(err error) { errMsg = err.Error() },
+			retryBufferSize:  3,
+		},
+	}
+
+	w := &worker{}
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+		{Message: "e3", Timestamp: time.Now()},
+		{Message: "e4", Timestamp: time.Now()},
+		{Message: "e5", Timestamp: time.Now()},
+	}
+
+	handler.flushCurrentBatch(w, &events)
+
+	require.Len(t, w.retryBuffer, 3, "retry buffer should be capped at retryBufferSize")
+	require.Equal(t, "e3", w.retryBuffer[0].Message, "oldest events should be dropped")
+	require.Equal(t, "e4", w.retryBuffer[1].Message)
+	require.Equal(t, "e5", w.retryBuffer[2].Message)
+	require.Contains(t, errMsg, "dropping 2 oldest events")
+}
+
+// Expectation: flushCurrentBatch should not drop events when retry buffer is within limit.
+func Test_flushCurrentBatch_RetryBufferWithinLimit_NoDrop_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client:           GetHTTPClientMock(500, "error", func() {}),
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(_ error) {},
+			retryBufferSize:  10,
+		},
+	}
+
+	w := &worker{}
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+	}
+
+	handler.flushCurrentBatch(w, &events)
+
+	require.Len(t, w.retryBuffer, 2)
+
+	require.Equal(t, "e1", w.retryBuffer[0].Message)
+	require.Equal(t, "e2", w.retryBuffer[1].Message)
+}
+
+// Expectation: flushCurrentBatch should cap combined retry buffer and new failures.
+func Test_flushCurrentBatch_RetryBufferCapsExistingPlusNew_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client:           GetHTTPClientMock(500, "error", func() {}),
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(_ error) {},
+			retryBufferSize:  3,
+		},
+	}
+
+	w := &worker{
+		retryBuffer: []CLEFEvent{
+			{Message: "old1", Timestamp: time.Now()},
+			{Message: "old2", Timestamp: time.Now()},
+		},
+	}
+	events := []CLEFEvent{
+		{Message: "new1", Timestamp: time.Now()},
+		{Message: "new2", Timestamp: time.Now()},
+	}
+
+	handler.flushCurrentBatch(w, &events)
+
+	require.Len(t, w.retryBuffer, 3)
+	require.Equal(t, "old2", w.retryBuffer[0].Message, "oldest should be dropped first")
+	require.Equal(t, "new1", w.retryBuffer[1].Message)
+	require.Equal(t, "new2", w.retryBuffer[2].Message)
+}
+
+// Expectation: flushCurrentBatch should not trigger cap logic when retry buffer is exactly at limit.
+func Test_flushCurrentBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.T) {
+	t.Parallel()
+
+	var dropCalled bool
+	handler := &SeqHandler{
+		shared: &shared{
+			client: GetHTTPClientMock(500, "error", func() {}),
+			seqURL: "http://example.com",
+			errorHandlerFunc: func(err error) {
+				if strings.Contains(err.Error(), "dropped") {
+					dropCalled = true
+				}
+			},
+			retryBufferSize: 2,
+		},
+	}
+
+	w := &worker{}
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+	}
+
+	handler.flushCurrentBatch(w, &events)
+
+	require.Len(t, w.retryBuffer, 2)
+	require.False(t, dropCalled, "should not drop when exactly at limit")
 }
 
 // Expectation: attemptSendBatch with empty input should return nil without making HTTP calls.

@@ -13,13 +13,12 @@ import (
 
 const (
 	defaultBatchSize       = 50
+	defaultBufferSize      = 1000
+	defaultRetryBufferSize = 1000
 	defaultFlushInterval   = 2 * time.Second
-	defaultPurgeUnsetAfter = 5 * time.Minute
 	defaultWorkerCount     = 1
 	defaultSendBlocking    = false
 	defaultDisableFlushing = false
-
-	maxWorkerEventBacklog = 1000
 )
 
 var _ slog.Handler = (*SeqHandler)(nil)
@@ -29,8 +28,9 @@ type shared struct {
 	seqURL           string
 	apiKey           string
 	batchSize        int
+	bufferSize       int
+	retryBufferSize  int
 	flushInterval    time.Duration
-	purgeUnsentAfter time.Duration
 	disableTLSVerify bool
 	workerCount      int
 	nonBlocking      bool
@@ -102,12 +102,13 @@ func NewSeqHandler(seqURL string, opts ...SeqOption) *SeqHandler {
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
 
-			batchSize:        defaultBatchSize,
-			flushInterval:    defaultFlushInterval,
-			purgeUnsentAfter: defaultPurgeUnsetAfter,
-			workerCount:      defaultWorkerCount,
-			nonBlocking:      !defaultSendBlocking,
-			noFlush:          defaultDisableFlushing,
+			bufferSize:      defaultBufferSize,
+			retryBufferSize: defaultRetryBufferSize,
+			batchSize:       defaultBatchSize,
+			flushInterval:   defaultFlushInterval,
+			workerCount:     defaultWorkerCount,
+			nonBlocking:     !defaultSendBlocking,
+			noFlush:         defaultDisableFlushing,
 		},
 
 		sourceKey: slog.SourceKey,
@@ -135,7 +136,7 @@ func (h *SeqHandler) start() {
 
 	h.workers = make([]worker, h.workerCount)
 	for i := range h.workerCount {
-		h.workers[i].eventsCh = make(chan CLEFEvent, maxWorkerEventBacklog)
+		h.workers[i].eventsCh = make(chan CLEFEvent, h.bufferSize)
 
 		h.workerWg.Add(1)
 		go h.runBackgroundFlusher(&h.workers[i])

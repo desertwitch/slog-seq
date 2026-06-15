@@ -88,6 +88,86 @@ func Test_WithBatchSize_Negative_FallsBackToDefault_Success(t *testing.T) {
 	require.Equal(t, defaultBatchSize, handler.batchSize)
 }
 
+// Expectation: WithBufferSize should set the channel capacity.
+func Test_WithBufferSize_SetsCapacity_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithBufferSize(500),
+		WithWorkers(1),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, 500, handler.bufferSize)
+	require.Equal(t, 500, cap(handler.workers[0].eventsCh))
+}
+
+// Expectation: WithBufferSize with zero should fall back to the default.
+func Test_WithBufferSize_Zero_FallsBackToDefault_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithBufferSize(0),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, defaultBufferSize, handler.bufferSize)
+}
+
+// Expectation: WithBufferSize with negative value should fall back to the default.
+func Test_WithBufferSize_Negative_FallsBackToDefault_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithBufferSize(-5),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, defaultBufferSize, handler.bufferSize)
+}
+
+// Expectation: WithRetryBufferSize should set the retry buffer size.
+func Test_WithRetryBufferSize_SetsSize_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithRetryBufferSize(2000),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, 2000, handler.retryBufferSize)
+}
+
+// Expectation: WithRetryBufferSize with zero should fall back to the default.
+func Test_WithRetryBufferSize_Zero_FallsBackToDefault_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithRetryBufferSize(0),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, defaultRetryBufferSize, handler.retryBufferSize)
+}
+
+// Expectation: WithRetryBufferSize with negative value should fall back to the default.
+func Test_WithRetryBufferSize_Negative_FallsBackToDefault_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithRetryBufferSize(-5),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	require.Equal(t, defaultRetryBufferSize, handler.retryBufferSize)
+}
+
 // Expectation: WithFlushInterval should set the flush interval on the handler.
 func Test_WithFlushInterval_SetsInterval_Success(t *testing.T) {
 	t.Parallel()
@@ -286,7 +366,7 @@ func Test_WithGlobalAttrs_AppearsInEvents_Success(t *testing.T) {
 	logger.Info("test event")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "myapp", evt.Properties["service"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")

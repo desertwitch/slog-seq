@@ -47,6 +47,7 @@ func WithAPIKey(apiKey string) SeqOption {
 }
 
 // WithBatchSize sets the number of events to batch before sending to Seq.
+//
 // Values less than 1 fall back to the default of 50.
 func WithBatchSize(batchSize int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
@@ -60,12 +61,46 @@ func WithBatchSize(batchSize int) SeqOption {
 	})
 }
 
+// WithBufferSize sets the event channel capacity per worker. In non-blocking
+// mode, events are dropped when the buffer is full. In blocking mode, Handle
+// blocks until space is available.
+//
+// Values less than 1 fall back to the default of 1000.
+func WithBufferSize(n int) SeqOption {
+	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if n < 1 {
+			n = defaultBufferSize
+		}
+
+		h.bufferSize = n
+
+		return h
+	})
+}
+
+// WithRetryBufferSize sets the maximum number of failed events held for retry
+// per worker. When full, the oldest events are dropped.
+//
+// Values less than 1 fall back to the default of 1000.
+func WithRetryBufferSize(n int) SeqOption {
+	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if n < 1 {
+			n = defaultRetryBufferSize
+		}
+
+		h.retryBufferSize = n
+
+		return h
+	})
+}
+
 // WithFlushInterval sets the interval at which to flush the batch, even if the
-// batch size has not been reached. Values less than or equal to zero fall back
-// to the default of 2 seconds.
+// batch size has not been reached.
+//
+// Values less than 1 fall back to the default of 2 seconds.
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		if flushInterval <= 0 {
+		if flushInterval < 1 {
 			flushInterval = defaultFlushInterval
 		}
 
@@ -136,8 +171,9 @@ func WithSourceKey(key string) SeqOption {
 }
 
 // WithWorkers sets the number of background workers that send events to Seq.
-// Values less than 1 fall back to the default of 1. Consider increasing this if
-// you have a very high volume of events.
+// Consider increasing this if you have a very high volume of events.
+//
+// Values less than 1 fall back to the default of 1.
 func WithWorkers(count int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if count < 1 {

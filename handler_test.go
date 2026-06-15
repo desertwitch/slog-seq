@@ -63,6 +63,8 @@ func Test_NewSeqHandler_Defaults_Success(t *testing.T) {
 	require.Equal(t, "http://fake", handler.seqURL)
 	require.Empty(t, handler.apiKey)
 	require.Equal(t, defaultBatchSize, handler.batchSize)
+	require.Equal(t, defaultBufferSize, handler.bufferSize)
+	require.Equal(t, defaultRetryBufferSize, handler.retryBufferSize)
 	require.Equal(t, defaultFlushInterval, handler.flushInterval)
 	require.Equal(t, defaultWorkerCount, handler.workerCount)
 	require.True(t, handler.nonBlocking, "default should be non-blocking")
@@ -105,7 +107,7 @@ func Test_start_CreatesWorkerChannels_Success(t *testing.T) {
 	require.Len(t, handler.workers, 3)
 	for i, w := range handler.workers {
 		require.NotNil(t, w.eventsCh, "worker %d should have a channel", i)
-		require.Equal(t, maxWorkerEventBacklog, cap(w.eventsCh), "worker %d channel capacity", i)
+		require.Equal(t, handler.bufferSize, cap(w.eventsCh), "worker %d channel capacity", i)
 	}
 }
 
@@ -287,7 +289,7 @@ func Test_SeqHandler_Handle_ReturnsNilError_Success(t *testing.T) {
 
 	require.NoError(t, err)
 
-	<-handler.workers[0].eventsCh // drain
+	<-handler.Events(0) // drain
 }
 
 // Expectation: Handle should send events with the correct message, level, and properties.
@@ -308,7 +310,7 @@ func Test_SeqHandler_Handle_CorrectProperties_Success(t *testing.T) {
 	logger.Info("Hello, slog-seq!", "user", "alice", "count", 123)
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "Hello, slog-seq!", evt.Message)
 		require.Equal(t, "Information", evt.Level)
 		require.Equal(t, "alice", evt.Properties["user"])
@@ -337,7 +339,7 @@ func Test_SeqHandler_Handle_WithAttrs_MergesAttributes_Success(t *testing.T) {
 	logger2.Info("WithAttrs test", "version", "1.2.3")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "testsvc", evt.Properties["service"])
 		require.Equal(t, "1.2.3", evt.Properties["version"])
 	case <-time.After(2000 * time.Millisecond):
@@ -364,7 +366,7 @@ func Test_SeqHandler_Handle_WithGroup_PrefixesKeys_Success(t *testing.T) {
 	grouped.Info("Grouped log")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		request := evt.Properties["request"].(map[string]any)
 		headers := request["headers"].(map[string]any)
 		require.Equal(t, "1234", request["id"])
@@ -388,7 +390,7 @@ func Test_SeqHandler_Handle_LogValuer_Resolved_Success(t *testing.T) {
 	logger.Info("valuer", "payload", payload{ID: 99, Name: "test"})
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		p := evt.Properties["payload"].(map[string]any)
 		require.Equal(t, int64(99), p["id"])
 		require.Equal(t, "test", p["name"])
@@ -415,8 +417,8 @@ func Test_SeqHandler_Handle_Grouping_ConsistentOutput_Success(t *testing.T) {
 	logger.WithGroup("s").LogAttrs(ctx, slog.LevelInfo, "huba", slog.Int("a", 1), slog.Int("b", 2))
 	logger.LogAttrs(ctx, slog.LevelInfo, "huba", slog.Group("s", slog.Int("a", 1), slog.Int("b", 2)))
 
-	event1 := <-handler.workers[0].eventsCh
-	event2 := <-handler.workers[0].eventsCh
+	event1 := <-handler.Events(0)
+	event2 := <-handler.Events(0)
 
 	event1.Timestamp = event2.Timestamp
 	require.Equal(t, event1, event2)
@@ -439,7 +441,7 @@ func Test_SeqHandler_Handle_NamedGroupMerge_Success(t *testing.T) {
 	)
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		db, ok := evt.Properties["db"].(map[string]any)
 		require.True(t, ok, "expected db to be a nested map")
 		require.Equal(t, "localhost", db["host"])
@@ -476,8 +478,8 @@ func Test_SeqHandler_Handle_ReplaceAttr_RedactsPassword_Success(t *testing.T) {
 	logger.Info("Super secret info", "password", "2Fat2Fly")
 	logger.WithGroup("secret_info").Info("Wohoo", "password", "secret")
 
-	event1 := <-handler.workers[0].eventsCh
-	event2 := <-handler.workers[0].eventsCh
+	event1 := <-handler.Events(0)
+	event2 := <-handler.Events(0)
 
 	require.Equal(t, "*****", event1.Properties["password"])
 
@@ -510,7 +512,7 @@ func Test_SeqHandler_Handle_ReplaceAttr_EmptyKey_DropsAttr_Success(t *testing.T)
 	logger.Info("filtered", "secret", "hidden", "visible", "shown")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Nil(t, evt.Properties["secret"], "dropped attr should not appear")
 		require.Equal(t, "shown", evt.Properties["visible"])
 	case <-time.After(2 * time.Second):
@@ -542,7 +544,7 @@ func Test_SeqHandler_Handle_ReplaceAttrGroupScope_CorrectGroups_Success(t *testi
 	logger := slog.New(handler)
 	logger.With("a", 1).WithGroup("g").With("b", 2).Info("test", "c", 3)
 
-	<-handler.workers[0].eventsCh
+	<-handler.Events(0)
 
 	require.GreaterOrEqual(t, len(captured), 3, "expected at least 3 ReplaceAttr calls")
 	require.Empty(t, captured[0], "expected no groups for 'a'")
@@ -568,8 +570,8 @@ func Test_SeqHandler_Handle_AnonymousGroup_InlinesAttributes_Success(t *testing.
 	logger.With("", payload{ID: 42, Name: "keyname"}).
 		Info("anon-group")
 
-	evt1 := <-handler.workers[0].eventsCh
-	evt2 := <-handler.workers[0].eventsCh
+	evt1 := <-handler.Events(0)
+	evt2 := <-handler.Events(0)
 
 	require.Equal(t, int64(42), evt1.Properties["id"])
 	require.Equal(t, "keyname", evt1.Properties["name"])
@@ -601,7 +603,7 @@ func Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success(t *testing.T) {
 	logger.Info("Hello, slog-seq!", "user", "alice", "count", 123)
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.NotNil(t, evt.Properties["gosource"], "expected gosource to be set")
 		source := evt.Properties["gosource"].(*slog.Source)
 		require.NotEmpty(t, source.File)
@@ -635,7 +637,7 @@ func Test_SeqHandler_Handle_MultipleWorkers_AllEventsReceived_Success(t *testing
 	drain:
 		for {
 			select {
-			case <-handler.workers[w].eventsCh:
+			case <-handler.Events(w):
 				total++
 			default:
 				break drain
@@ -667,7 +669,7 @@ func Test_SeqHandler_Handle_MultipleWorkers_EvenDistribution_Success(t *testing.
 	for w := range handler.workers {
 		for {
 			select {
-			case <-handler.workers[w].eventsCh:
+			case <-handler.Events(w):
 				counts[w]++
 			default:
 				goto next
@@ -714,7 +716,7 @@ func Test_SeqHandler_Handle_ConcurrentCalls_NoLostEvents_Success(t *testing.T) {
 	for w := range handler.workers {
 		for {
 			select {
-			case <-handler.workers[w].eventsCh:
+			case <-handler.Events(w):
 				total++
 			default:
 				goto next
@@ -771,7 +773,7 @@ func Test_SeqHandler_Handle_ConcurrentWithAttrsAndHandle_NoLostEvents_Success(t 
 	for w := range handler.workers {
 		for {
 			select {
-			case <-handler.workers[w].eventsCh:
+			case <-handler.Events(w):
 				total++
 			default:
 				goto next
@@ -796,14 +798,14 @@ func Test_SeqHandler_Handle_NonBlocking_DropsOnFullChannel_Success(t *testing.T)
 
 	logger := slog.New(handler)
 
-	for i := range maxWorkerEventBacklog + 500 {
+	for i := range handler.bufferSize + 500 {
 		logger.Info("flood", "i", i)
 	}
 
 	count := 0
 	for {
 		select {
-		case <-handler.workers[0].eventsCh:
+		case <-handler.Events(0):
 			count++
 		default:
 			goto done
@@ -811,7 +813,7 @@ func Test_SeqHandler_Handle_NonBlocking_DropsOnFullChannel_Success(t *testing.T)
 	}
 done:
 
-	require.LessOrEqual(t, count, maxWorkerEventBacklog)
+	require.LessOrEqual(t, count, handler.bufferSize)
 	require.NotZero(t, count, "expected some events to be received")
 }
 
@@ -829,7 +831,7 @@ func Test_SeqHandler_Handle_MultilineMessage_SplitsException_Success(t *testing.
 	logger.Info("first line\nsecond line\nthird line")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "first line", evt.Message)
 		require.Equal(t, "second line\nthird line", evt.Exception)
 	case <-time.After(2 * time.Second):
@@ -851,7 +853,7 @@ func Test_SeqHandler_Handle_SingleLineMessage_EmptyException_Success(t *testing.
 	logger.Info("no newline here")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "no newline here", evt.Message)
 		require.Empty(t, evt.Exception)
 	case <-time.After(2 * time.Second):
@@ -873,7 +875,7 @@ func Test_SeqHandler_Handle_OnlyNewline_EmptyMessageAndException_Success(t *test
 	logger.Info("\n")
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Empty(t, evt.Message)
 		require.Empty(t, evt.Exception)
 	case <-time.After(2 * time.Second):
@@ -895,7 +897,7 @@ func Test_SeqHandler_Handle_ErrorAttr_ConvertedToString_Success(t *testing.T) {
 	logger.Info("has error", "err", errors.New("something broke"))
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		require.Equal(t, "something broke", evt.Properties["err"])
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
@@ -917,7 +919,7 @@ func Test_SeqHandler_Handle_ErrorAttrInGroup_ConvertedToString_Success(t *testin
 		slog.Group("details", slog.Any("err", errors.New("nested failure"))))
 
 	select {
-	case evt := <-handler.workers[0].eventsCh:
+	case evt := <-handler.Events(0):
 		details := evt.Properties["details"].(map[string]any)
 		require.Equal(t, "nested failure", details["err"])
 	case <-time.After(2 * time.Second):
@@ -984,7 +986,7 @@ func Test_SeqHandler_Close_BlockingClose_UnblocksSenders_Success(t *testing.T) {
 
 	logger := slog.New(handler)
 
-	for range maxWorkerEventBacklog {
+	for range handler.bufferSize {
 		logger.Info("fill")
 	}
 
@@ -1039,8 +1041,8 @@ func Test_SeqHandler_WithAttrs_DoesNotLeakToSibling_Success(t *testing.T) {
 	l1.Info("msg1")
 	l2.Info("msg2")
 
-	evt1 := <-handler.workers[0].eventsCh
-	evt2 := <-handler.workers[0].eventsCh
+	evt1 := <-handler.Events(0)
+	evt2 := <-handler.Events(0)
 
 	require.Equal(t, "l1", evt1.Properties["from"])
 	require.Equal(t, "l2", evt2.Properties["from"])
@@ -1156,8 +1158,8 @@ func Test_SeqHandler_WithGroup_DoesNotLeakToSibling_Success(t *testing.T) {
 	l1.Info("msg1")
 	l2.Info("msg2")
 
-	evt1 := <-handler.workers[0].eventsCh
-	evt2 := <-handler.workers[0].eventsCh
+	evt1 := <-handler.Events(0)
+	evt2 := <-handler.Events(0)
 
 	require.Contains(t, evt1.Properties, "g1")
 	require.NotContains(t, evt1.Properties, "g2")

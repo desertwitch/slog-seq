@@ -72,11 +72,6 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 
 		case <-ticker.C:
 			h.flushCurrentBatch(w, &events)
-
-		case <-w.purgeTicker.C:
-			// Purge events older than 5 minutes from retry buffer
-			cutoff := time.Now().Add(-h.purgeUnsentAfter)
-			h.purgeOldEvents(w, cutoff)
 		}
 	}
 }
@@ -94,6 +89,12 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 		}
 
 		*events = (*events)[:0]
+	}
+
+	if len(w.retryBuffer) > h.retryBufferSize {
+		dropped := len(w.retryBuffer) - h.retryBufferSize
+		w.retryBuffer = w.retryBuffer[dropped:]
+		h.errorHandlerFunc(fmt.Errorf("dropping %d oldest events; retry buffer exceeded limit", dropped))
 	}
 }
 
