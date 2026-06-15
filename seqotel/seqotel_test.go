@@ -1,10 +1,12 @@
-package slogseq
+package seqotel
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
+	slogseq "github.com/desertwitch/slog-seq"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -22,12 +24,12 @@ func (s *stubInvalidSpan) SpanContext() trace.SpanContext {
 	return trace.SpanContext{} // invalid: zero trace ID and span ID
 }
 
-func newTestProcessor(t *testing.T) (*LoggingSpanProcessor, *SeqHandler) {
+func newTestProcessor(t *testing.T) (*LoggingSpanProcessor, *SeqOTelHandler) {
 	t.Helper()
 
 	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-		withNoFlush(),
+		slogseq.WithWorkers(1),
+		slogseq.WithNoFlush(),
 	)
 	t.Cleanup(func() { _ = handler.Close() })
 
@@ -43,13 +45,15 @@ func newTestTracerProvider(processor *LoggingSpanProcessor, res *resource.Resour
 	return sdktrace.NewTracerProvider(opts...)
 }
 
-func drainEvents(t *testing.T, handler *SeqHandler, n int) []CLEFEvent {
+func drainEvents(t *testing.T, handler *SeqOTelHandler, n int) []slogseq.CLEFEvent {
 	t.Helper()
 
-	events := make([]CLEFEvent, 0, n)
+	ch := handler.Events(0)
+
+	events := make([]slogseq.CLEFEvent, 0, n)
 	for i := range n {
 		select {
-		case e := <-handler.workers[0].eventsCh:
+		case e := <-ch:
 			events = append(events, e)
 		case <-time.After(2 * time.Second):
 			t.Fatalf("timed out waiting for event %d", i)
@@ -57,6 +61,93 @@ func drainEvents(t *testing.T, handler *SeqHandler, n int) []CLEFEvent {
 	}
 
 	return events
+}
+
+// Expectation: NewLogger should return a non-nil logger and handler.
+func Test_NewLogger_ReturnsNonNil_Success(t *testing.T) {
+	t.Parallel()
+
+	logger, handler := NewLogger("http://fake", slogseq.WithNoFlush())
+	defer handler.Close()
+
+	require.NotNil(t, logger)
+	require.NotNil(t, handler)
+}
+
+// Expectation: NewSeqOTelHandler should return a non-nil handler.
+func Test_NewSeqOTelHandler_ReturnsNonNil_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqOTelHandler("http://fake", slogseq.WithNoFlush())
+	defer handler.Close()
+
+	require.NotNil(t, handler)
+}
+
+// Expectation: NewLoggingSpanProcessor should return a processor with the given handler.
+func Test_NewLoggingSpanProcessor_ReturnsProcessor_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqOTelHandler("http://fake", slogseq.WithNoFlush())
+	defer handler.Close()
+
+	processor := NewLoggingSpanProcessor(handler)
+
+	require.NotNil(t, processor)
+	require.Same(t, handler, processor.Handler)
+}
+
+// Expectation: Without a span context, TraceID and SpanID should remain empty.
+func Test_SeqOTelHandler_Handle_NoTraceContext_EmptyTraceFields_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		slogseq.WithWorkers(1),
+		slogseq.WithNoFlush(),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	logger.Info("no trace")
+
+	select {
+	case evt := <-handler.Events(0):
+		require.Empty(t, evt.TraceID)
+		require.Empty(t, evt.SpanID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
+// Expectation: When a valid span context is present, TraceID and SpanID should be populated.
+func Test_SeqOTelHandler_Handle_WithTraceContext_SetsTraceAndSpanID_Success(t *testing.T) {
+	t.Parallel()
+
+	_, handler := NewLogger("http://fake",
+		slogseq.WithWorkers(1),
+		slogseq.WithNoFlush(),
+	)
+	defer handler.Close()
+
+	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
+	spanID, _ := trace.SpanIDFromHex("0102030405060708")
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    traceID,
+		SpanID:     spanID,
+		TraceFlags: trace.FlagsSampled,
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+
+	logger := slog.New(handler)
+	logger.InfoContext(ctx, "traced event")
+
+	select {
+	case evt := <-handler.Events(0):
+		require.Equal(t, "0102030405060708090a0b0c0d0e0f10", evt.TraceID)
+		require.Equal(t, "0102030405060708", evt.SpanID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
 }
 
 // Expectation: OnStart should be a no-op and not panic.
@@ -175,7 +266,7 @@ func Test_LoggingSpanProcessor_OnEnd_DefaultLevel_Information_Success(t *testing
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
 }
 
 // Expectation: OnEnd should set ParentSpanID when the span has a parent.
@@ -238,7 +329,7 @@ func Test_LoggingSpanProcessor_OnEnd_ErrorStatus_SetsErrorLevel_Success(t *testi
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, CLEFLevelError.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelError.String(), events[0].Level)
 	require.Equal(t, "something failed", events[0].Message)
 }
 
@@ -256,7 +347,7 @@ func Test_LoggingSpanProcessor_OnEnd_ErrorStatusNoDescription_KeepsSpanName_Succ
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, CLEFLevelError.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelError.String(), events[0].Level)
 	require.Equal(t, "errorNoDesc", events[0].Message)
 }
 
@@ -274,7 +365,7 @@ func Test_LoggingSpanProcessor_OnEnd_OKStatus_NoErrorLevel_Success(t *testing.T)
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
 	require.Equal(t, "okSpan", events[0].Message)
 }
 
@@ -375,7 +466,7 @@ func Test_LoggingSpanProcessor_OnEnd_SpanEvent_DefaultLevel_Information_Success(
 
 	events := drainEvents(t, handler, 2)
 
-	require.Equal(t, CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
 }
 
 // Expectation: A span with Unset status (default) should have Information level.
@@ -392,7 +483,7 @@ func Test_LoggingSpanProcessor_OnEnd_UnsetStatus_InformationLevel_Success(t *tes
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
 	require.Equal(t, "unsetSpan", events[0].Message)
 }
 
@@ -437,7 +528,7 @@ func Test_LoggingSpanProcessor_OnEnd_WithException_SetsErrorLevel_Success(t *tes
 
 	eventEvt := events[0]
 	require.Equal(t, "error occurred", eventEvt.Message)
-	require.Equal(t, CLEFLevelError.String(), eventEvt.Level)
+	require.Equal(t, slogseq.CLEFLevelError.String(), eventEvt.Level)
 	require.Equal(t, int64(500), eventEvt.Properties["code"])
 }
 
@@ -478,7 +569,7 @@ func Test_LoggingSpanProcessor_OnEnd_NoEvents_EmitsOneEvent_Success(t *testing.T
 	require.Equal(t, "lonelySpan", events[0].Message)
 
 	select {
-	case <-handler.workers[0].eventsCh:
+	case <-handler.Events(0):
 		t.Fatal("unexpected extra event")
 	default:
 	}
@@ -559,7 +650,7 @@ func Test_LoggingSpanProcessor_OnEnd_InvalidSpanContext_NoEmit_Success(t *testin
 	processor.logOtelSpanAsCLEF(&stubInvalidSpan{})
 
 	select {
-	case <-handler.workers[0].eventsCh:
+	case <-handler.Events(0):
 		t.Fatal("should not emit event for invalid span context")
 	default:
 		// good
@@ -578,7 +669,7 @@ func Test_LoggingSpanProcessor_OnEnd_InvalidSpanContext_EventNotEmitted_Success(
 	})
 
 	select {
-	case <-handler.workers[0].eventsCh:
+	case <-handler.Events(0):
 		t.Fatal("should not emit event for invalid span context")
 	default:
 		// good
@@ -605,7 +696,7 @@ func Test_LoggingSpanProcessor_OnEnd_WithStacktrace_SetsException_Success(t *tes
 
 	eventEvt := events[0]
 	require.Equal(t, "null pointer", eventEvt.Message)
-	require.Equal(t, CLEFLevelError.String(), eventEvt.Level)
+	require.Equal(t, slogseq.CLEFLevelError.String(), eventEvt.Level)
 	require.Equal(t, "at main.go:42\nat handler.go:15", eventEvt.Exception)
 	require.Equal(t, "NullPointerException", eventEvt.Properties["exception.type"])
 }
@@ -723,6 +814,16 @@ func Test_dottedToNested_SingleDot_Success(t *testing.T) {
 
 	empty := result[""].(map[string]any)
 	require.Equal(t, "dotval", empty[""])
+}
+
+// Expectation: addNested with empty path should be a no-op.
+func Test_addNested_EmptyPath_NoOp_Success(t *testing.T) {
+	t.Parallel()
+
+	dst := make(map[string]any)
+	addNested(dst, []string{}, "value")
+
+	require.Empty(t, dst)
 }
 
 // Expectation: addNested with single-element path should set the value directly.

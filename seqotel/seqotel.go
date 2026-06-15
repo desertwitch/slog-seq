@@ -1,10 +1,29 @@
-package slogseq
+// Package seqotel provides OpenTelemetry integration for slog-seq, including
+// automatic trace context enrichment for slog events and a SpanProcessor that
+// forwards completed spans to Seq as CLEF events.
+//
+// Use [NewSeqOTelHandler] to create a handler with trace correlation enabled:
+//
+//	handler := seqotel.NewSeqOTelHandler("http://seq:5341/ingest/clef",
+//		slogseq.WithAPIKey("your-api-key"),
+//		slogseq.WithBatchSize(50),
+//	)
+//	defer handler.Close()
+//	slog.SetDefault(slog.New(handler))
+//
+// Use [NewLoggingSpanProcessor] to forward spans to Seq:
+//
+//	processor := seqotel.NewLoggingSpanProcessor(handler)
+//	tp := trace.NewTracerProvider(trace.WithSpanProcessor(processor))
+package seqotel
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
+	slogseq "github.com/desertwitch/slog-seq"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/sdk/trace"
 	tr "go.opentelemetry.io/otel/trace"
@@ -15,15 +34,58 @@ var (
 	_ trace.SpanExporter  = (*LoggingSpanProcessor)(nil)
 )
 
+// NewLogger is a convenience function that creates a [SeqOTelHandler] and wraps
+// it in an [slog.Logger]. Refer to [NewSeqOTelHandler] for teardown information.
+func NewLogger(seqURL string, opts ...slogseq.SeqOption) (*slog.Logger, *SeqOTelHandler) {
+	handler := NewSeqOTelHandler(seqURL, opts...)
+
+	return slog.New(handler), handler
+}
+
+// SeqOTelHandler is a [slog.Handler] extending [slogseq.SeqHandler] with
+// OpenTelemetry trace context enrichment.
+//
+// Create one using [NewSeqOTelHandler]. Do not construct directly.
+type SeqOTelHandler struct { //nolint:revive
+	*slogseq.SeqHandler
+}
+
+// NewSeqOTelHandler creates and starts a new [SeqOTelHandler] with OpenTelemetry
+// trace context enrichment enabled. Log events are automatically correlated
+// with active spans. Derived handlers (via WithAttrs and WithGroup) share the
+// same workers and connection. Close must be called on the original handler
+// when no longer needed, rendering all (sub-)handlers unusable.
+//
+// See [slogseq] package documentation for all possible [slogseq.SeqOption].
+func NewSeqOTelHandler(seqURL string, opts ...slogseq.SeqOption) *SeqOTelHandler {
+	opts = append(opts, slogseq.WithEventEnricher(
+		func(ctx context.Context, event *slogseq.CLEFEvent) {
+			if spanCtx := tr.SpanContextFromContext(ctx); spanCtx.IsValid() {
+				event.TraceID = spanCtx.TraceID().String()
+				event.SpanID = spanCtx.SpanID().String()
+			}
+		}))
+
+	handler := slogseq.NewSeqHandler(seqURL, opts...)
+
+	return &SeqOTelHandler{handler}
+}
+
 // LoggingSpanProcessor is an OpenTelemetry [trace.SpanProcessor] and
 // [trace.SpanExporter] that converts completed spans and their events into CLEF
-// events and dispatches them to Seq via a [SeqHandler].
+// events and dispatches them to Seq via a [SeqOTelHandler].
 //
 // Span events are emitted before the span itself to preserve chronological
 // ordering. The processor does not manage the handler's lifecycle - the caller
 // is responsible for closing the handler.
 type LoggingSpanProcessor struct {
-	Handler *SeqHandler
+	Handler *SeqOTelHandler
+}
+
+// NewLoggingSpanProcessor creates a [LoggingSpanProcessor] that forwards
+// completed spans to Seq via the given [SeqOTelHandler].
+func NewLoggingSpanProcessor(handler *SeqOTelHandler) *LoggingSpanProcessor {
+	return &LoggingSpanProcessor{Handler: handler}
 }
 
 // OnStart is a no-op. This processor only acts on completed spans.
@@ -76,7 +138,7 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 	}
 
 	spanKind := tr.ValidateSpanKind(span.SpanKind()).String()
-	event := &CLEFEvent{
+	event := &slogseq.CLEFEvent{
 		Timestamp:          span.EndTime(),
 		Message:            span.Name(),
 		TraceID:            sc.TraceID().String(),
@@ -99,9 +161,9 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 	// Set level based on span status
 	status := span.Status()
 
-	event.Level = CLEFLevelInformation.String()
+	event.Level = slogseq.CLEFLevelInformation.String()
 	if status.Code == codes.Error {
-		event.Level = CLEFLevelError.String()
+		event.Level = slogseq.CLEFLevelError.String()
 		if status.Description != "" {
 			event.Message = status.Description
 		}
@@ -117,10 +179,10 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	}
 
 	spanKind := tr.ValidateSpanKind(span.SpanKind()).String()
-	event := &CLEFEvent{
+	event := &slogseq.CLEFEvent{
 		Timestamp:          e.Time,
 		Message:            e.Name,
-		Level:              CLEFLevelInformation.String(),
+		Level:              slogseq.CLEFLevelInformation.String(),
 		TraceID:            sc.TraceID().String(),
 		SpanID:             sc.SpanID().String(),
 		SpanStart:          span.StartTime(),
@@ -138,7 +200,7 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		v := attr.Value.AsInterface()
 		event.Properties[k] = v
 		if k == "exception.message" {
-			event.Level = CLEFLevelError.String()
+			event.Level = slogseq.CLEFLevelError.String()
 			event.Message = fmt.Sprint(v)
 		}
 		if k == "exception.stacktrace" {

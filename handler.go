@@ -9,8 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -37,6 +35,7 @@ type shared struct {
 	workerCount      int
 	nonBlocking      bool
 	noFlush          bool
+	eventEnricher    func(context.Context, *CLEFEvent)
 
 	// http client
 	client *http.Client
@@ -68,11 +67,19 @@ type attrSet struct {
 	groups []string
 }
 
-// SeqHandler is an slog.Handler that sends structured log events to a Seq
+// NewLogger is a convenience function that creates a [SeqHandler] and wraps it
+// in an [slog.Logger]. Refer to [NewSeqHandler] for teardown information.
+func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
+	handler := NewSeqHandler(seqURL, opts...)
+
+	return slog.New(handler), handler
+}
+
+// SeqHandler is an [slog.Handler] that sends structured log events to a Seq
 // server using the CLEF (Compact Log Event Format) protocol. It supports
 // batching, multiple workers, and asynchronous HTTP delivery.
 //
-// Create one using [NewLogger]. Do not construct directly.
+// Create one using [NewSeqHandler]. Do not construct directly.
 type SeqHandler struct {
 	*shared
 
@@ -83,8 +90,14 @@ type SeqHandler struct {
 	sourceKey string
 }
 
-func newSeqHandler(seqURL string) *SeqHandler {
-	h := &SeqHandler{
+// NewSeqHandler creates and starts a new [SeqHandler]. seqURL is the URL of the
+// Seq server's CLEF ingestion endpoint. Derived handlers (via WithAttrs and
+// WithGroup) share the same workers and connection. Close must be called on the
+// original handler when no longer needed, rendering all (sub-)handlers unusable.
+//
+// See package documentation for all possible [SeqOption].
+func NewSeqHandler(seqURL string, opts ...SeqOption) *SeqHandler {
+	handler := &SeqHandler{
 		shared: &shared{
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
@@ -101,7 +114,13 @@ func newSeqHandler(seqURL string) *SeqHandler {
 		options:   slog.HandlerOptions{},
 	}
 
-	return h
+	for _, opt := range opts {
+		handler = opt.apply(handler)
+	}
+
+	handler.start()
+
+	return handler
 }
 
 func (h *SeqHandler) start() {
@@ -192,9 +211,8 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		Properties: props,
 	}
 
-	if spanCtx := trace.SpanContextFromContext(ctx); spanCtx.IsValid() {
-		event.TraceID = spanCtx.TraceID().String()
-		event.SpanID = spanCtx.SpanID().String()
+	if h.eventEnricher != nil {
+		h.eventEnricher(ctx, &event)
 	}
 
 	h.HandleCLEFEvent(event)
@@ -203,9 +221,8 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 // HandleCLEFEvent dispatches a pre-built CLEF event to a worker for
-// asynchronous delivery to Seq. This is the entry point used by
-// [LoggingSpanProcessor] and can be used for custom integrations that bypass
-// slog.
+// asynchronous delivery to Seq. This can be used by span processors or
+// custom integrations that bypass slog.
 func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -277,7 +294,9 @@ func (h *SeqHandler) WithGroup(name string) slog.Handler {
 
 // Close shuts down the handler, draining all pending events and waiting for
 // workers to finish. It is safe to call multiple times. Logging after Close
-// will silently drop events.
+// will silently drop events. Note that this method will immediately render
+// all derived handlers (WithGroup/WithAttrs) unusable as well, so should only
+// be called once - usually on the shallowest handler on program teardown.
 func (h *SeqHandler) Close() error {
 	h.closeOnce.Do(func() {
 		// Blocked senders hold read locks, so we release these first.
@@ -299,6 +318,13 @@ func (h *SeqHandler) Close() error {
 	})
 
 	return nil
+}
+
+// Events returns the event channel for the given worker index.
+//
+// Intended only for use in tests to inspect dispatched events.
+func (h *SeqHandler) Events(workerIndex int) <-chan CLEFEvent {
+	return h.workers[workerIndex].eventsCh
 }
 
 func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog.Attr) {
