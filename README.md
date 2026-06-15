@@ -94,7 +94,7 @@ Alternatively, you can provide your own HTTP client by using the option `slogseq
 
 ## Multiple workers
 
-You can set the number of workers that will send logs to the Seq server by using the option `slogseq.WithWorkers(n)`.
+You can set the number of workers that send logs to the Seq server by using the option `slogseq.WithWorkers(n)`.
 
 This can be useful if you have a high enough volume of logs to cause dropped messages.
 
