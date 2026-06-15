@@ -201,23 +201,6 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 	return nil
 }
 
-func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
-	newBuf := w.retryBuffer[:0]
-
-	for _, e := range w.retryBuffer {
-		if e.Timestamp.After(olderThan) {
-			newBuf = append(newBuf, e)
-		}
-	}
-
-	purgedEvents := len(w.retryBuffer) - len(newBuf)
-	if purgedEvents > 0 {
-		h.errorHandlerFunc(fmt.Errorf("purged %d events from retry buffer older than %s", purgedEvents, olderThan.Format(time.RFC3339)))
-	}
-
-	w.retryBuffer = newBuf
-}
-
 // dottedToNested converts a flat map with dotted keys ("a.b.c") into a
 // nested map structure. Used for ResourceAttributes encoding.
 func dottedToNested(props map[string]any) map[string]any {
