@@ -36,8 +36,9 @@ func (f seqOptionFunc) apply(h *SeqHandler) *SeqHandler {
 	return f(h)
 }
 
-// WithAPIKey sets the API key for the Seq server. Default is empty (no
-// authentication).
+// WithAPIKey sets the API key for the Seq server.
+//
+// If unset, no key is sent to the server (no authentication).
 func WithAPIKey(apiKey string) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.apiKey = apiKey
@@ -48,7 +49,7 @@ func WithAPIKey(apiKey string) SeqOption {
 
 // WithBatchSize sets the number of events to batch before sending to Seq.
 //
-// Values less than 1 fall back to the default of 50.
+// If unset, or less than 1, the default is 50.
 func WithBatchSize(batchSize int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if batchSize < 1 {
@@ -65,7 +66,7 @@ func WithBatchSize(batchSize int) SeqOption {
 // mode, events are dropped when the buffer is full. In blocking mode, Handle
 // blocks until space is available.
 //
-// Values less than 1 fall back to the default of 1000.
+// If unset, or less than 1, the default is 1000.
 func WithBufferSize(n int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if n < 1 {
@@ -81,7 +82,7 @@ func WithBufferSize(n int) SeqOption {
 // WithRetryBufferSize sets the maximum number of failed events held for retry
 // per worker. When full, the oldest events are dropped.
 //
-// Values less than 1 fall back to the default of 1000.
+// If unset, or less than 1, the default is 1000.
 func WithRetryBufferSize(n int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if n < 1 {
@@ -97,7 +98,7 @@ func WithRetryBufferSize(n int) SeqOption {
 // WithFlushInterval sets the interval at which to flush the batch, even if the
 // batch size has not been reached.
 //
-// Values less than 1 fall back to the default of 2 seconds.
+// If unset, or less than 1, the default is 2 seconds.
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if flushInterval < 1 {
@@ -120,8 +121,9 @@ func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 }
 
 // WithInsecure disables TLS certificate verification. Has no effect if
-// WithHTTPClient is also set, since the custom client controls its own TLS
-// configuration.
+// WithHTTPClient is also set, the custom client controls its own configuration.
+//
+// If unset, the default is to allow only valid certificates.
 func WithInsecure() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.disableTLSVerify = true
@@ -130,8 +132,9 @@ func WithInsecure() SeqOption {
 	})
 }
 
-// WithHTTPClient sets the HTTP client used for sending events to Seq. If not
-// set, a default client is created with sensible timeouts (30s).
+// WithHTTPClient sets the HTTP client used for sending events to Seq.
+//
+// If unset, a default client is created with sensible timeouts (30s).
 func WithHTTPClient(client *http.Client) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.client = client
@@ -160,8 +163,9 @@ func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 }
 
 // WithSourceKey sets the key used for source location information when
-// AddSource is enabled in the handler options. Default is slog.SourceKey
-// ("source").
+// AddSource is enabled in the handler options.
+//
+// If unset, the default is slog.SourceKey("source").
 func WithSourceKey(key string) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.sourceKey = key
@@ -173,7 +177,7 @@ func WithSourceKey(key string) SeqOption {
 // WithWorkers sets the number of background workers that send events to Seq.
 // Consider increasing this if you have a very high volume of events.
 //
-// Values less than 1 fall back to the default of 1.
+// If unset, or less than 1, the default is 1.
 func WithWorkers(count int) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if count < 1 {
@@ -187,8 +191,10 @@ func WithWorkers(count int) SeqOption {
 }
 
 // WithNonBlocking controls whether Handle blocks when the worker channel is
-// full. When true (the default), events are dropped silently. When false,
-// Handle blocks until space is available or the handler is closed.
+// full. When true, events are dropped silently. When false, Handle blocks until
+// space is available or the handler is closed.
+//
+// If unset, the default is true (non-blocking) operation.
 func WithNonBlocking(nonBlocking bool) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.nonBlocking = nonBlocking
@@ -198,7 +204,9 @@ func WithNonBlocking(nonBlocking bool) SeqOption {
 }
 
 // WithErrorHandlerFunc sets a callback that is invoked when the handler
-// encounters an error sending events to Seq. Default is a no-op.
+// encounters an error sending events to Seq.
+//
+// If unset, the default is a no-op.
 func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.errorHandlerFunc = fn
@@ -211,6 +219,8 @@ func WithErrorHandlerFunc(fn func(error)) SeqOption {
 // additional context before dispatch. Called during Handle with the log
 // record's context and event pointer. Multiple enrichers run in the order
 // they were added.
+//
+// If unset, the default is a no-op.
 func WithEventEnricher(fn func(context.Context, *CLEFEvent)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		if fn != nil {
