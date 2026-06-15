@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -221,9 +222,15 @@ func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
 func dottedToNested(props map[string]any) map[string]any {
 	out := make(map[string]any, len(props))
 
-	for k, v := range props {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
 		path := strings.Split(k, ".")
-		addNested(out, path, v)
+		addNested(out, path, props[k])
 	}
 
 	return out

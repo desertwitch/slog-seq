@@ -1747,6 +1747,24 @@ func Test_dottedToNested_SingleDot_Success(t *testing.T) {
 	require.Equal(t, "dotval", empty[""])
 }
 
+// Expectation: dottedToNested should produce deterministic output with conflicting keys.
+func Test_dottedToNested_ConflictingKeys_Deterministic_Success(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"a":   "scalar",
+		"a.b": "nested",
+	}
+
+	// Run multiple times to verify determinism.
+	for range 100 {
+		result := dottedToNested(input)
+		a, ok := result["a"].(map[string]any)
+		require.True(t, ok, "a should be a map after conflict resolution")
+		require.Equal(t, "nested", a["b"])
+	}
+}
+
 // Expectation: addNested with empty path should be a no-op.
 func Test_addNested_EmptyPath_NoOp_Success(t *testing.T) {
 	t.Parallel()
