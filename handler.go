@@ -35,7 +35,7 @@ type shared struct {
 	workerCount      int
 	nonBlocking      bool
 	noFlush          bool
-	eventEnricher    func(context.Context, *CLEFEvent)
+	eventEnrichers   []func(context.Context, *CLEFEvent)
 
 	// http client
 	client *http.Client
@@ -211,8 +211,8 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		Properties: props,
 	}
 
-	if h.eventEnricher != nil {
-		h.eventEnricher(ctx, &event)
+	for _, enrich := range h.eventEnrichers {
+		enrich(ctx, &event)
 	}
 
 	h.HandleCLEFEvent(event)

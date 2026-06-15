@@ -171,12 +171,15 @@ func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	})
 }
 
-// WithEventEnricher sets a function that enriches each CLEF event with
+// WithEventEnricher adds a function that enriches each CLEF event with
 // additional context before dispatch. Called during Handle with the log
-// record's context and event pointer. Default is nil (no enrichment).
+// record's context and event pointer. Multiple enrichers run in the order
+// they were added.
 func WithEventEnricher(fn func(context.Context, *CLEFEvent)) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		h.eventEnricher = fn
+		if fn != nil {
+			h.eventEnrichers = append(h.eventEnrichers, fn)
+		}
 
 		return h
 	})

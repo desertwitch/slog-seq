@@ -526,6 +526,39 @@ func Test_WithEventEnricher_ReceivesContext_Success(t *testing.T) {
 	require.Equal(t, "hello", captured)
 }
 
+// Expectation: Multiple WithEventEnricher calls should chain in order.
+func Test_WithEventEnricher_Multiple_ChainsInOrder_Success(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+
+	handler := NewSeqHandler("http://fake",
+		WithWorkers(1),
+		WithNoFlush(),
+		WithEventEnricher(func(_ context.Context, event *CLEFEvent) {
+			order = append(order, "first")
+			event.Properties["first"] = true
+		}),
+		WithEventEnricher(func(_ context.Context, event *CLEFEvent) {
+			order = append(order, "second")
+			event.Properties["second"] = true
+		}),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	logger.Info("chained enrichment")
+
+	select {
+	case evt := <-handler.Events(0):
+		require.Equal(t, []string{"first", "second"}, order)
+		require.Equal(t, true, evt.Properties["first"])
+		require.Equal(t, true, evt.Properties["second"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
 // Expectation: The last option should win when the same option is applied multiple times.
 func Test_Options_LastOneWins_Success(t *testing.T) {
 	t.Parallel()
