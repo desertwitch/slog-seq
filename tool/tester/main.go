@@ -93,10 +93,12 @@ func main() {
 
 	slog.InfoContext(ctx, "This is a span log message", "key", "value")
 
-	ctx, subSpan := tracer.Start(ctx, "sub operation")
+	_, subSpan := tracer.Start(ctx, "sub operation")
 	subSpan.AddEvent("Sub operation started")
 	time.Sleep(500 * time.Millisecond)
-	subSpan.AddEvent("Sub operation completed", tr.WithAttributes(attribute.String("key", "value")))
+	subSpan.AddEvent("Sub operation completed",
+		tr.WithAttributes(attribute.String("key", "value")),
+	)
 	subSpan.End()
 
 	span.AddEvent("Work done")

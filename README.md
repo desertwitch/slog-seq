@@ -135,7 +135,7 @@ time.Sleep(500 * time.Millisecond)
 
 slog.InfoContext(ctx, "This is a span log message", "key", "value")
 
-childCtx, subSpan := tracer.Start(ctx, "sub operation")
+_, subSpan := tracer.Start(ctx, "sub operation")
 subSpan.AddEvent("Sub operation started")
 time.Sleep(500 * time.Millisecond)
 subSpan.AddEvent("Sub operation completed",
