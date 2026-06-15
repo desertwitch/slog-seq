@@ -1,15 +1,14 @@
 name: changelog
-
 on:
   pull_request:
 permissions:
   contents: read
-
 jobs:
-  has-updates:
+  slogseq:
+    name: changelog (slogseq)
     runs-on: ubuntu-latest
     steps:
-      - name: Check for changelog updates
+      - name: Check slogseq changelog
         uses: actions/github-script@v9
         with:
           script: |
@@ -20,16 +19,55 @@ jobs:
               per_page: 100,
             });
 
-            const hasChangelog = files.some(f =>
+            const rootChanged = files.some(f =>
+              !f.filename.startsWith('seqotel/') &&
+              !f.filename.startsWith('.changes/') &&
+              f.filename !== 'CHANGELOG.md'
+            );
+            const rootChangelog = files.some(f =>
               f.filename.startsWith('.changes/') ||
               f.filename === 'CHANGELOG.md'
             );
 
-            if (!hasChangelog) {
+            if (rootChanged && !rootChangelog) {
               core.setFailed(
-                'This PR is possibly missing a changelog entry or merge. ' +
+                'slogseq module has changes but no changelog entry. ' +
                 'Note that running `changie new` creates a new changelog entry.'
               );
             } else {
-              core.info('All good, changelog was updated.');
+              core.info('slogseq changelog is up to date.');
+            }
+
+  seqotel:
+    name: changelog (seqotel)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check seqotel changelog
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const otelChanged = files.some(f =>
+              f.filename.startsWith('seqotel/') &&
+              !f.filename.startsWith('seqotel/.changes/') &&
+              f.filename !== 'seqotel/CHANGELOG.md'
+            );
+            const otelChangelog = files.some(f =>
+              f.filename.startsWith('seqotel/.changes/') ||
+              f.filename === 'seqotel/CHANGELOG.md'
+            );
+
+            if (otelChanged && !otelChangelog) {
+              core.setFailed(
+                'seqotel module has changes but no changelog entry. ' +
+                'Note that running `changie new` creates a new changelog entry.'
+              );
+            } else {
+              core.info('seqotel changelog is up to date.');
             }

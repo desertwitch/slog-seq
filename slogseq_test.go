@@ -1,6 +1,7 @@
 package slogseq
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -9,44 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Expectation: NewLogger should return a non-nil logger and handler.
-func Test_NewLogger_ReturnsNonNil_Success(t *testing.T) {
-	t.Parallel()
-
-	logger, handler := NewLogger("http://fake", withNoFlush())
-	defer handler.Close()
-
-	require.NotNil(t, logger)
-	require.NotNil(t, handler)
-}
-
-// Expectation: NewLogger with no options should apply all defaults.
-func Test_NewLogger_Defaults_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake", withNoFlush())
-	defer handler.Close()
-
-	require.Equal(t, "http://fake", handler.seqURL)
-	require.Empty(t, handler.apiKey)
-	require.Equal(t, defaultBatchSize, handler.batchSize)
-	require.Equal(t, defaultFlushInterval, handler.flushInterval)
-	require.Equal(t, defaultWorkerCount, handler.workerCount)
-	require.True(t, handler.nonBlocking, "default should be non-blocking")
-	require.False(t, handler.disableTLSVerify)
-	require.Equal(t, slog.SourceKey, handler.sourceKey)
-	require.Nil(t, handler.options.Level)
-	require.Nil(t, handler.options.ReplaceAttr)
-	require.False(t, handler.options.AddSource)
-}
-
 // Expectation: WithAPIKey should set the API key on the handler.
 func Test_WithAPIKey_SetsAPIKey_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
 		WithAPIKey("my-secret-key"),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -59,7 +29,7 @@ func Test_WithAPIKey_EmptyString_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithAPIKey(""),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -72,7 +42,7 @@ func Test_WithBatchSize_SetsBatchSize_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithBatchSize(100),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -85,7 +55,7 @@ func Test_WithBatchSize_One_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithBatchSize(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -98,7 +68,7 @@ func Test_WithBatchSize_Zero_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithBatchSize(0),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -111,7 +81,7 @@ func Test_WithBatchSize_Negative_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithBatchSize(-10),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -124,7 +94,7 @@ func Test_WithFlushInterval_SetsInterval_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithFlushInterval(10*time.Second),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -137,7 +107,7 @@ func Test_WithFlushInterval_Zero_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithFlushInterval(0),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -150,7 +120,7 @@ func Test_WithFlushInterval_Negative_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithFlushInterval(-5*time.Second),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -169,7 +139,7 @@ func Test_WithHandlerOptions_SetsOptions_Success(t *testing.T) {
 			AddSource:   true,
 			ReplaceAttr: replaceAttr,
 		}),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -186,7 +156,7 @@ func Test_WithHandlerOptions_CopiesStruct_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithHandlerOptions(opts),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -202,7 +172,7 @@ func Test_WithInsecure_EnablesSkipVerify_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithInsecure(),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -217,7 +187,7 @@ func Test_WithHTTPClient_SetsClient_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithHTTPClient(custom),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -232,7 +202,7 @@ func Test_WithHTTPClient_PreventsDefaultClient_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithHTTPClient(custom),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -245,7 +215,7 @@ func Test_NoHTTPClient_StartCreatesDefault_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -262,7 +232,7 @@ func Test_WithGlobalAttrs_AddsToHandlerAttrs_Success(t *testing.T) {
 			slog.Int("version", 3),
 		),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -278,7 +248,7 @@ func Test_WithGlobalAttrs_NoGroupScope_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithGlobalAttrs(slog.String("k", "v")),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -292,7 +262,7 @@ func Test_WithGlobalAttrs_Multiple_Accumulates_Success(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithGlobalAttrs(slog.String("a", "1")),
 		WithGlobalAttrs(slog.String("b", "2")),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -308,7 +278,7 @@ func Test_WithGlobalAttrs_AppearsInEvents_Success(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithGlobalAttrs(slog.String("service", "myapp")),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -330,7 +300,7 @@ func Test_WithGlobalAttrs_ResolvesLogValuer_Success(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithGlobalAttrs(slog.Any("p", payload{ID: 7, Name: "eager"})),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -344,7 +314,7 @@ func Test_WithSourceKey_SetsKey_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithSourceKey("caller"),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -357,7 +327,7 @@ func Test_WithWorkers_SetsCount_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(4),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -371,7 +341,7 @@ func Test_WithWorkers_Zero_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(0),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -384,7 +354,7 @@ func Test_WithWorkers_Negative_FallsBackToDefault_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(-5),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -397,7 +367,7 @@ func Test_WithNonBlocking_True_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithNonBlocking(true),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -410,7 +380,7 @@ func Test_WithNonBlocking_False_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithNonBlocking(false),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -426,7 +396,7 @@ func Test_WithErrorHandlerFunc_SetsFunc_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithErrorHandlerFunc(fn),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -478,14 +448,115 @@ func Test_NoErrorHandlerFunc_DefaultNoPanic_Success(t *testing.T) {
 	})
 }
 
-// Expectation: withNoFlush should set the noFlush flag.
-func Test_withNoFlush_SetsFlag_Success(t *testing.T) {
+// Expectation: WithNoFlush should set the noFlush flag.
+func Test_WithNoFlush_SetsFlag_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	require.True(t, handler.noFlush)
+}
+
+// Expectation: WithEventEnricher should call the enricher with the context and event.
+func Test_WithEventEnricher_EnrichesEvent_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithWorkers(1),
+		WithNoFlush(),
+		WithEventEnricher(func(_ context.Context, event *CLEFEvent) {
+			event.Properties["enriched"] = true
+		}),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	logger.Info("test enrichment")
+
+	select {
+	case evt := <-handler.Events(0):
+		require.Equal(t, true, evt.Properties["enriched"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
+}
+
+// Expectation: WithEventEnricher set to nil should not panic during Handle.
+func Test_WithEventEnricher_Nil_NoPanic_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake",
+		WithWorkers(1),
+		WithNoFlush(),
+		WithEventEnricher(nil),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	require.NotPanics(t, func() {
+		logger.Info("no enricher")
+	})
+
+	<-handler.Events(0) // drain
+}
+
+// Expectation: The enricher should receive the context passed to InfoContext.
+func Test_WithEventEnricher_ReceivesContext_Success(t *testing.T) {
+	t.Parallel()
+
+	type ctxKey struct{}
+	var captured any
+
+	handler := NewSeqHandler("http://fake",
+		WithWorkers(1),
+		WithNoFlush(),
+		WithEventEnricher(func(ctx context.Context, _ *CLEFEvent) {
+			captured = ctx.Value(ctxKey{})
+		}),
+	)
+	defer handler.Close()
+
+	ctx := context.WithValue(context.Background(), ctxKey{}, "hello")
+	logger := slog.New(handler)
+	logger.InfoContext(ctx, "with context")
+
+	<-handler.Events(0) // drain
+
+	require.Equal(t, "hello", captured)
+}
+
+// Expectation: Multiple WithEventEnricher calls should chain in order.
+func Test_WithEventEnricher_Multiple_ChainsInOrder_Success(t *testing.T) {
+	t.Parallel()
+
+	var order []string
+
+	handler := NewSeqHandler("http://fake",
+		WithWorkers(1),
+		WithNoFlush(),
+		WithEventEnricher(func(_ context.Context, event *CLEFEvent) {
+			order = append(order, "first")
+			event.Properties["first"] = true
+		}),
+		WithEventEnricher(func(_ context.Context, event *CLEFEvent) {
+			order = append(order, "second")
+			event.Properties["second"] = true
+		}),
+	)
+	defer handler.Close()
+
+	logger := slog.New(handler)
+	logger.Info("chained enrichment")
+
+	select {
+	case evt := <-handler.Events(0):
+		require.Equal(t, []string{"first", "second"}, order)
+		require.Equal(t, true, evt.Properties["first"])
+		require.Equal(t, true, evt.Properties["second"])
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event")
+	}
 }
 
 // Expectation: The last option should win when the same option is applied multiple times.
@@ -499,7 +570,7 @@ func Test_Options_LastOneWins_Success(t *testing.T) {
 		WithBatchSize(20),
 		WithFlushInterval(1*time.Second),
 		WithFlushInterval(5*time.Second),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -530,7 +601,7 @@ func Test_Options_AppliedInOrder_Success(t *testing.T) {
 		return h
 	})
 
-	_, handler := NewLogger("http://fake", opt1, opt2, opt3, withNoFlush())
+	_, handler := NewLogger("http://fake", opt1, opt2, opt3, WithNoFlush())
 	defer handler.Close()
 
 	require.Equal(t, []string{"first", "second", "third"}, order)

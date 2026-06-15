@@ -9,8 +9,8 @@ on:
 permissions:
   contents: read
 jobs:
-  golang:
-    name: test
+  slogseq:
+    name: test (slogseq)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -18,6 +18,17 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: false
+      - name: Run tests
+        run: go test -failfast -race -covermode=atomic ./...
 
-      - name: Run all Go tests
-        run: make test
+  seqotel:
+    name: test (seqotel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'seqotel/go.mod'
+          cache: false
+      - name: Run tests
+        run: cd seqotel && go test -failfast -race -covermode=atomic ./...

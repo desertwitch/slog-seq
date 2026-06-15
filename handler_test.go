@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // A tiny payload that implements slog.LogValuer.
@@ -42,24 +41,55 @@ func (s stringValuer) LogValue() slog.Value {
 	return slog.StringValue(string(s))
 }
 
-// Expectation: The constructor should apply all provided options correctly.
+// Expectation: NewLogger should return a non-nil logger and handler.
+func Test_NewLogger_ReturnsNonNil_Success(t *testing.T) {
+	t.Parallel()
+
+	logger, handler := NewLogger("http://fake", WithNoFlush())
+	defer handler.Close()
+
+	require.NotNil(t, logger)
+	require.NotNil(t, handler)
+}
+
+// Expectation: NewSeqHandler should return a non-nil handler with all defaults applied.
+func Test_NewSeqHandler_Defaults_Success(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("http://fake", WithNoFlush())
+	defer handler.Close()
+
+	require.NotNil(t, handler)
+	require.Equal(t, "http://fake", handler.seqURL)
+	require.Empty(t, handler.apiKey)
+	require.Equal(t, defaultBatchSize, handler.batchSize)
+	require.Equal(t, defaultFlushInterval, handler.flushInterval)
+	require.Equal(t, defaultWorkerCount, handler.workerCount)
+	require.True(t, handler.nonBlocking, "default should be non-blocking")
+	require.False(t, handler.disableTLSVerify)
+	require.Equal(t, slog.SourceKey, handler.sourceKey)
+	require.Nil(t, handler.options.Level)
+	require.Nil(t, handler.options.ReplaceAttr)
+	require.False(t, handler.options.AddSource)
+}
+
+// Expectation: NewSeqHandler should apply all provided options correctly.
 func Test_NewSeqHandler_WithOptions_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://localhost:5341",
+	handler := NewSeqHandler("http://localhost:5341",
 		WithAPIKey("test-key"),
 		WithBatchSize(50),
 		WithFlushInterval(5*time.Second),
 		WithHandlerOptions(&slog.HandlerOptions{Level: slog.LevelWarn}),
 	)
+	defer handler.Close()
 
 	require.Equal(t, "http://localhost:5341", handler.seqURL)
 	require.Equal(t, "test-key", handler.apiKey)
 	require.Equal(t, 50, handler.batchSize)
 	require.Equal(t, 5*time.Second, handler.flushInterval)
 	require.Equal(t, slog.LevelWarn, handler.options.Level.Level())
-
-	_ = handler.Close()
 }
 
 // Expectation: start() should create workers with buffered channels.
@@ -68,7 +98,7 @@ func Test_start_CreatesWorkerChannels_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(3),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -207,7 +237,7 @@ func Test_SeqHandler_Enabled_NilLevel_AllEnabled_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -223,7 +253,7 @@ func Test_SeqHandler_SourceKey_ReturnsConfigured_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithSourceKey("mysource"),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -235,7 +265,7 @@ func Test_SeqHandler_SourceKey_ReturnsDefault_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -248,7 +278,7 @@ func Test_SeqHandler_Handle_ReturnsNilError_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -269,7 +299,7 @@ func Test_SeqHandler_Handle_CorrectProperties_Success(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -297,7 +327,7 @@ func Test_SeqHandler_Handle_WithAttrs_MergesAttributes_Success(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -324,7 +354,7 @@ func Test_SeqHandler_Handle_WithGroup_PrefixesKeys_Success(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -350,7 +380,7 @@ func Test_SeqHandler_Handle_LogValuer_Resolved_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -376,7 +406,7 @@ func Test_SeqHandler_Handle_Grouping_ConsistentOutput_Success(t *testing.T) {
 		WithBatchSize(10),
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -398,7 +428,7 @@ func Test_SeqHandler_Handle_NamedGroupMerge_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -438,7 +468,7 @@ func Test_SeqHandler_Handle_ReplaceAttr_RedactsPassword_Success(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithWorkers(1),
 		WithHandlerOptions(opts),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -472,7 +502,7 @@ func Test_SeqHandler_Handle_ReplaceAttr_EmptyKey_DropsAttr_Success(t *testing.T)
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 		WithHandlerOptions(opts),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -505,7 +535,7 @@ func Test_SeqHandler_Handle_ReplaceAttrGroupScope_CorrectGroups_Success(t *testi
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 		WithHandlerOptions(opts),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -526,7 +556,7 @@ func Test_SeqHandler_Handle_AnonymousGroup_InlinesAttributes_Success(t *testing.
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -562,7 +592,7 @@ func Test_SeqHandler_Handle_AddSource_IncludesSourceInfo_Success(t *testing.T) {
 		WithFlushInterval(5*time.Second),
 		WithSourceKey("gosource"),
 		WithHandlerOptions(&slog.HandlerOptions{AddSource: true}),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -589,7 +619,7 @@ func Test_SeqHandler_Handle_MultipleWorkers_AllEventsReceived_Success(t *testing
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(4),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -622,7 +652,7 @@ func Test_SeqHandler_Handle_MultipleWorkers_EvenDistribution_Success(t *testing.
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(4),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -657,7 +687,7 @@ func Test_SeqHandler_Handle_ConcurrentCalls_NoLostEvents_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(2),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -703,7 +733,7 @@ func Test_SeqHandler_Handle_ConcurrentWithAttrsAndHandle_NoLostEvents_Success(t 
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(2),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -760,7 +790,7 @@ func Test_SeqHandler_Handle_NonBlocking_DropsOnFullChannel_Success(t *testing.T)
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 		WithNonBlocking(true),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -791,7 +821,7 @@ func Test_SeqHandler_Handle_MultilineMessage_SplitsException_Success(t *testing.
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -813,7 +843,7 @@ func Test_SeqHandler_Handle_SingleLineMessage_EmptyException_Success(t *testing.
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -835,7 +865,7 @@ func Test_SeqHandler_Handle_OnlyNewline_EmptyMessageAndException_Success(t *test
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -851,66 +881,13 @@ func Test_SeqHandler_Handle_OnlyNewline_EmptyMessageAndException_Success(t *test
 	}
 }
 
-// Expectation: When a valid span context is present, TraceID and SpanID should be populated.
-func Test_SeqHandler_Handle_WithTraceContext_SetsTraceAndSpanID_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-		withNoFlush(),
-	)
-	defer handler.Close()
-
-	traceID, _ := trace.TraceIDFromHex("0102030405060708090a0b0c0d0e0f10")
-	spanID, _ := trace.SpanIDFromHex("0102030405060708")
-	sc := trace.NewSpanContext(trace.SpanContextConfig{
-		TraceID:    traceID,
-		SpanID:     spanID,
-		TraceFlags: trace.FlagsSampled,
-	})
-	ctx := trace.ContextWithSpanContext(context.Background(), sc)
-
-	logger := slog.New(handler)
-	logger.InfoContext(ctx, "traced event")
-
-	select {
-	case evt := <-handler.workers[0].eventsCh:
-		require.Equal(t, "0102030405060708090a0b0c0d0e0f10", evt.TraceID)
-		require.Equal(t, "0102030405060708", evt.SpanID)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-}
-
-// Expectation: Without a span context, TraceID and SpanID should remain empty.
-func Test_SeqHandler_Handle_NoTraceContext_EmptyTraceFields_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithWorkers(1),
-		withNoFlush(),
-	)
-	defer handler.Close()
-
-	logger := slog.New(handler)
-	logger.Info("no trace")
-
-	select {
-	case evt := <-handler.workers[0].eventsCh:
-		require.Empty(t, evt.TraceID)
-		require.Empty(t, evt.SpanID)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for event")
-	}
-}
-
 // Expectation: Error values in attributes should be converted to their string representation.
 func Test_SeqHandler_Handle_ErrorAttr_ConvertedToString_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -931,7 +908,7 @@ func Test_SeqHandler_Handle_ErrorAttrInGroup_ConvertedToString_Success(t *testin
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -984,7 +961,7 @@ func Test_SeqHandler_Close_LogAfterClose_NoPanic_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 
 	_ = handler.Close()
@@ -1002,7 +979,7 @@ func Test_SeqHandler_Close_BlockingClose_UnblocksSenders_Success(t *testing.T) {
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
 		WithNonBlocking(false),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 
 	logger := slog.New(handler)
@@ -1034,7 +1011,7 @@ func Test_SeqHandler_WithAttrs_EmptySlice_ReturnsSame_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -1051,7 +1028,7 @@ func Test_SeqHandler_WithAttrs_DoesNotLeakToSibling_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -1073,7 +1050,7 @@ func Test_SeqHandler_WithAttrs_DoesNotLeakToSibling_Success(t *testing.T) {
 func Test_SeqHandler_WithAttrs_ReturnsNewHandler_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithAttrs([]slog.Attr{slog.String("k", "v")}).(*SeqHandler)
@@ -1085,7 +1062,7 @@ func Test_SeqHandler_WithAttrs_ReturnsNewHandler_Success(t *testing.T) {
 func Test_SeqHandler_WithAttrs_CopiesHandlerAttrs_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithAttrs([]slog.Attr{slog.String("a", "1")}).(*SeqHandler)
@@ -1103,7 +1080,7 @@ func Test_SeqHandler_WithAttrs_CopiesHandlerAttrs_Success(t *testing.T) {
 func Test_SeqHandler_WithAttrs_ChainedCopiesIndependent_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithAttrs([]slog.Attr{slog.String("a", "1")}).(*SeqHandler)
@@ -1122,7 +1099,7 @@ func Test_SeqHandler_WithAttrs_ChainedCopiesIndependent_Success(t *testing.T) {
 func Test_SeqHandler_WithAttrs_SnapshotsGroups_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	g1 := handler.WithGroup("g1").(*SeqHandler)
@@ -1141,7 +1118,7 @@ func Test_SeqHandler_WithAttrs_SnapshotsGroups_Success(t *testing.T) {
 func Test_SeqHandler_WithAttrs_SharesSharedPointer_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithAttrs([]slog.Attr{slog.String("k", "v")}).(*SeqHandler)
@@ -1154,7 +1131,7 @@ func Test_SeqHandler_WithGroup_EmptyName_ReturnsSame_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -1168,7 +1145,7 @@ func Test_SeqHandler_WithGroup_DoesNotLeakToSibling_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		withNoFlush(),
+		WithNoFlush(),
 	)
 	defer handler.Close()
 
@@ -1193,7 +1170,7 @@ func Test_SeqHandler_WithGroup_DoesNotLeakToSibling_Success(t *testing.T) {
 func Test_SeqHandler_WithGroup_ReturnsNewHandler_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithGroup("g").(*SeqHandler)
@@ -1205,7 +1182,7 @@ func Test_SeqHandler_WithGroup_ReturnsNewHandler_Success(t *testing.T) {
 func Test_SeqHandler_WithGroup_CopiesHandlerGroups_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithGroup("g1").(*SeqHandler)
@@ -1224,7 +1201,7 @@ func Test_SeqHandler_WithGroup_CopiesHandlerGroups_Success(t *testing.T) {
 func Test_SeqHandler_WithGroup_ChainedCopiesIndependent_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithGroup("a").(*SeqHandler)
@@ -1242,7 +1219,7 @@ func Test_SeqHandler_WithGroup_ChainedCopiesIndependent_Success(t *testing.T) {
 func Test_SeqHandler_WithGroup_SharesSharedPointer_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	h2 := handler.WithGroup("g").(*SeqHandler)
@@ -1404,7 +1381,7 @@ func Test_nestInto_OverwritesNonMapValue_Success(t *testing.T) {
 func Test_resolveAttr_SimpleString_PassThrough_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	a := slog.String("key", "value")
@@ -1419,7 +1396,7 @@ func Test_resolveAttr_SimpleString_PassThrough_Success(t *testing.T) {
 func Test_resolveAttr_ErrorValue_ConvertedToString_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	a := slog.Any("err", stubError{"boom"})
@@ -1444,7 +1421,7 @@ func Test_resolveAttr_ReplaceAttrDrops_ReturnsFalse_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	a := slog.String("drop", "me")
@@ -1467,7 +1444,7 @@ func Test_resolveAttr_ReplaceAttrReceivesGroups_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	groups := []string{"a", "b"}
@@ -1490,7 +1467,7 @@ func Test_resolveAttr_ReplaceAttrRenamesKey_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	a := slog.String("old", "val")
@@ -1513,7 +1490,7 @@ func Test_resolveAttr_GroupKind_SkipsReplaceAttr_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	a := slog.Group("g", slog.String("inner", "v"))
@@ -1537,7 +1514,7 @@ func Test_resolveAttr_LogValuerResolvesToGroup_SkipsReplaceAttr_Success(t *testi
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	// payload resolves to a GroupValue, so resolveAttr should return early
@@ -1563,7 +1540,7 @@ func Test_resolveAttr_NonGroupLogValuer_ResolvedBeforeReplaceAttr_Success(t *tes
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	// stringValuer implements LogValuer and resolves to KindString.
@@ -1580,7 +1557,7 @@ func Test_resolveAttr_NonGroupLogValuer_ResolvedBeforeReplaceAttr_Success(t *tes
 func Test_resolveAttr_NilReplaceAttr_NoPanic_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	require.NotPanics(t, func() {
@@ -1605,7 +1582,7 @@ func Test_resolveAttr_ErrorConversionAfterReplace_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	a := slog.Any("err", stubError{"fail"})
@@ -1621,7 +1598,7 @@ func Test_resolveAttr_ErrorConversionAfterReplace_Success(t *testing.T) {
 func Test_addResolvedAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1634,7 +1611,7 @@ func Test_addResolvedAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
 func Test_addResolvedAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1648,7 +1625,7 @@ func Test_addResolvedAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
 func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1664,7 +1641,7 @@ func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T)
 func Test_addResolvedAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1678,7 +1655,7 @@ func Test_addResolvedAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
 func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1694,7 +1671,7 @@ func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
 func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := map[string]any{"g": "scalar"}
@@ -1709,7 +1686,7 @@ func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1728,7 +1705,7 @@ func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1743,7 +1720,7 @@ func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T)
 func Test_addResolvedAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake", withNoFlush())
+	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
@@ -1768,7 +1745,7 @@ func Test_addResolvedAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
 		},
 	}
 
-	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), withNoFlush())
+	_, handler := NewLogger("http://fake", WithHandlerOptions(opts), WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)

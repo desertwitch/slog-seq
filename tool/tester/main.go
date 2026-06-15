@@ -11,6 +11,7 @@ import (
 	"time"
 
 	slogseq "github.com/desertwitch/slog-seq"
+	"github.com/desertwitch/slog-seq/seqotel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace"
 	tr "go.opentelemetry.io/otel/trace"
@@ -23,11 +24,13 @@ var (
 
 func main() {
 	flag.Parse()
+
 	if flag.NFlag() == 0 {
 		flag.PrintDefaults()
 
 		return
 	}
+
 	opts := &slog.HandlerOptions{
 		Level:     slog.LevelDebug,
 		AddSource: true,
@@ -47,7 +50,7 @@ func main() {
 		},
 	}
 
-	seqLogger, handler := slogseq.NewLogger(*seqURL,
+	seqLogger, handler := seqotel.NewLogger(*seqURL,
 		slogseq.WithAPIKey(*apiKey),
 		slogseq.WithHandlerOptions(opts),
 		slogseq.WithBatchSize(50),
@@ -77,28 +80,36 @@ func main() {
 
 	grouped.Info("Grouped log", "password", "secret")
 
-	spanProcessor := trace.NewSimpleSpanProcessor(&slogseq.LoggingSpanProcessor{Handler: handler})
-	tp := trace.NewTracerProvider(trace.WithSpanProcessor(spanProcessor), trace.WithSampler(trace.AlwaysSample()))
+	processor := seqotel.NewLoggingSpanProcessor(handler)
+	tp := trace.NewTracerProvider(
+		trace.WithSpanProcessor(processor),
+		trace.WithSampler(trace.AlwaysSample()),
+	)
 	tracer := tp.Tracer("example-tracer")
-	ctx := context.Background()
-	spanCtx, span := tracer.Start(ctx, "operation", tr.WithSpanKind(tr.SpanKindClient))
+
+	ctx, span := tracer.Start(context.Background(), "operation", tr.WithSpanKind(tr.SpanKindClient))
 	span.AddEvent("Starting work")
 	time.Sleep(500 * time.Millisecond)
-	slog.InfoContext(spanCtx, "This is a span log message", "key", "value")
-	spanCtx, subSpan := tracer.Start(spanCtx, "sub operation")
+
+	slog.InfoContext(ctx, "This is a span log message", "key", "value")
+
+	_, subSpan := tracer.Start(ctx, "sub operation")
 	subSpan.AddEvent("Sub operation started")
 	time.Sleep(500 * time.Millisecond)
-	subSpan.AddEvent("Sub operation completed", tr.WithAttributes(attribute.String("key", "value")))
+	subSpan.AddEvent("Sub operation completed",
+		tr.WithAttributes(attribute.String("key", "value")),
+	)
 	subSpan.End()
+
 	span.AddEvent("Work done")
-	slog.InfoContext(spanCtx, "All done!")
+	slog.InfoContext(ctx, "All done!")
 	span.End()
 
 	errorTest := fmt.Errorf("this is an error: %w", errors.New("this is the cause"))
 	slog.Error("This is an error message", "huba", "fjall", "error", errorTest)
 
-	slog.New(handler).WithGroup("s").LogAttrs(ctx, slog.LevelDebug, "huba", slog.Int("a", 1), slog.Int("b", 2))
-	slog.New(handler).LogAttrs(ctx, slog.LevelInfo, "huba", slog.Group("s", slog.Int("a", 1), slog.Int("b", 2)))
+	slog.New(handler).WithGroup("s").LogAttrs(context.Background(), slog.LevelDebug, "huba", slog.Int("a", 1), slog.Int("b", 2))
+	slog.New(handler).LogAttrs(context.Background(), slog.LevelInfo, "huba", slog.Group("s", slog.Int("a", 1), slog.Int("b", 2)))
 
 	slog.Debug("This is a debug message", "huba", "fjall", slog.Int("u", 42))
 }

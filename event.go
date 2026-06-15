@@ -10,7 +10,7 @@ type CLEFEvent struct {
 	Timestamp time.Time `json:"@t,omitzero"`
 
 	// Message is the log message. For multi-line slog messages, this contains
-	// only the first line; the remainder goes into Exception.
+	// only the first line; the remainder goes into [CLEFEvent.Exception].
 	Message string `json:"@m,omitempty"`
 
 	// Exception holds supplementary detail such as a stack trace or the
@@ -24,20 +24,19 @@ type CLEFEvent struct {
 	// are serialized as top-level CLEF properties, not under a reserved key.
 	Properties map[string]any `json:"-"`
 
-	// TraceID is the OpenTelemetry trace identifier, if present.
+	// TraceID is a telemetry trace identifier, if present.
 	TraceID string `json:"@tr,omitempty"`
 
-	// SpanID is the OpenTelemetry span identifier, if present.
+	// SpanID is a telemetry span identifier, if present.
 	SpanID string `json:"@sp,omitempty"`
 
 	// SpanStart is the start time of the span, if present.
 	SpanStart time.Time `json:"@st,omitzero"`
 
-	// SpanKind is the OpenTelemetry span kind (e.g. "server", "client").
+	// SpanKind is the telemetry span kind ("server", "client"), if present.
 	SpanKind string `json:"@sk,omitempty"`
 
-	// ResourceAttributes holds OpenTelemetry resource attributes, encoded under
-	// the CLEF @ra key.
+	// ResourceAttributes holds telemetry resource attributes, if present.
 	ResourceAttributes map[string]any `json:"@ra,omitempty,omitzero"`
 
 	// ParentSpanID is the span identifier of the parent span, if present.

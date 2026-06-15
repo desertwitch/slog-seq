@@ -8,20 +8,31 @@ on:
 permissions:
   contents: read
 jobs:
-  golang:
+  coverage:
     name: coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version: 'stable'
           cache: false
 
-      - name: Run all Go tests
-        run: make test-coverage
+      - name: Run slogseq coverage
+        run: |
+          go test -failfast -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.tmp ./...
+          grep -v "mock_" coverage.tmp > coverage.txt
+          rm coverage.tmp
+
+      - name: Run seqotel coverage
+        run: |
+          cd seqotel
+          go test -failfast -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.tmp ./...
+          grep -v "mock_" coverage.tmp > coverage-otel.txt
+          rm coverage.tmp
 
       - uses: codecov/codecov-action@v5
         with:
+          files: coverage.txt,seqotel/coverage-otel.txt
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: desertwitch/slog-seq

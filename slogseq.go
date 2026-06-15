@@ -5,20 +5,21 @@
 // calls do not block on network I/O. Multiple workers can be configured
 // for high-throughput workloads.
 //
-// The package includes an optional OpenTelemetry SpanProcessor that converts
-// completed spans into CLEF events for tracing and ingestion by Seq.
+// For OpenTelemetry trace correlation and span forwarding, see the seqotel
+// sub-package.
 //
-// Create a logger with NewLogger:
+// Use [NewSeqHandler] to create a handler:
 //
-//	logger, handler := slogseq.NewLogger("http://seq:5341/ingest/clef",
-//	    slogseq.WithAPIKey("your-api-key"),
-//	    slogseq.WithBatchSize(50),
+//	handler := slogseq.NewSeqHandler("http://seq:5341/ingest/clef",
+//		slogseq.WithAPIKey("your-api-key"),
+//		slogseq.WithBatchSize(50),
 //	)
 //	defer handler.Close()
-//	slog.SetDefault(logger)
+//	slog.SetDefault(slog.New(handler))
 package slogseq
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -33,20 +34,6 @@ type seqOptionFunc func(*SeqHandler) *SeqHandler
 
 func (f seqOptionFunc) apply(h *SeqHandler) *SeqHandler {
 	return f(h)
-}
-
-// NewLogger creates a new Seq logger. seqURL is the URL of the Seq server. opts
-// is a list of options to configure the Seq handler.
-func NewLogger(seqURL string, opts ...SeqOption) (*slog.Logger, *SeqHandler) {
-	handler := newSeqHandler(seqURL)
-
-	for _, opt := range opts {
-		handler = opt.apply(handler)
-	}
-
-	handler.start()
-
-	return slog.New(handler), handler
 }
 
 // WithAPIKey sets the API key for the Seq server. Default is empty (no
@@ -184,8 +171,24 @@ func WithErrorHandlerFunc(fn func(error)) SeqOption {
 	})
 }
 
-// withNoFlush disables flushing (for use in tests).
-func withNoFlush() SeqOption {
+// WithEventEnricher adds a function that enriches each CLEF event with
+// additional context before dispatch. Called during Handle with the log
+// record's context and event pointer. Multiple enrichers run in the order
+// they were added.
+func WithEventEnricher(fn func(context.Context, *CLEFEvent)) SeqOption {
+	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
+		if fn != nil {
+			h.eventEnrichers = append(h.eventEnrichers, fn)
+		}
+
+		return h
+	})
+}
+
+// WithNoFlush disables flushing.
+//
+// Intended only for use in tests to inspect dispatched events.
+func WithNoFlush() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.noFlush = true
 
