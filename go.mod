@@ -4,8 +4,6 @@ go 1.24.0
 
 require github.com/stretchr/testify v1.11.1
 
-replace github.com/desertwitch/slog-seq/seqotel => ./seqotel
-
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
