@@ -141,7 +141,7 @@ func (h *SeqHandler) start() {
 		h.workers[i].eventsCh = make(chan CLEFEvent, h.bufferSize)
 
 		h.workerWg.Add(1)
-		go h.runBackgroundFlusher(&h.workers[i])
+		go h.runFlusher(&h.workers[i])
 	}
 }
 
@@ -202,7 +202,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		dst := nestInto(props, ha.groups)
 
 		for _, a := range ha.attrs {
-			h.addResolvedAttr(dst, ha.groups, a)
+			h.resolveAndAddAttr(dst, ha.groups, a)
 		}
 	}
 
@@ -211,7 +211,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		recordDst := nestInto(props, h.handlerGroups)
 
 		r.Attrs(func(a slog.Attr) bool {
-			h.addResolvedAttr(recordDst, h.handlerGroups, a)
+			h.resolveAndAddAttr(recordDst, h.handlerGroups, a)
 
 			return true
 		})
@@ -222,7 +222,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 			frame, _ := caller.Next()
 			source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
 
-			h.addResolvedAttr(recordDst, h.handlerGroups, slog.Any(h.sourceKey, &source))
+			h.resolveAndAddAttr(recordDst, h.handlerGroups, slog.Any(h.sourceKey, &source))
 		}
 	}
 
@@ -358,7 +358,7 @@ func (h *SeqHandler) Events(workerIndex int) <-chan CLEFEvent {
 	return h.workers[workerIndex].eventsCh
 }
 
-func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog.Attr) {
+func (h *SeqHandler) resolveAndAddAttr(dst map[string]any, groups []string, a slog.Attr) {
 	a, ok := h.resolveAttr(groups, a)
 	if !ok {
 		return
@@ -368,7 +368,7 @@ func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog
 		if a.Value.Kind() == slog.KindGroup {
 			// Anonymous group, inline
 			for _, ga := range a.Value.Group() {
-				h.addResolvedAttr(dst, groups, ga)
+				h.resolveAndAddAttr(dst, groups, ga)
 			}
 		}
 
@@ -387,7 +387,7 @@ func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog
 
 		childGroups := append(groups, a.Key) //nolint:gocritic
 		for _, ga := range a.Value.Group() {
-			h.addResolvedAttr(groupMap, childGroups, ga)
+			h.resolveAndAddAttr(groupMap, childGroups, ga)
 		}
 
 		return

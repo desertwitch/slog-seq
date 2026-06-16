@@ -97,10 +97,10 @@ func (p *LoggingSpanProcessor) OnEnd(s trace.ReadOnlySpan) {
 	events := s.Events()
 
 	for _, e := range events {
-		p.logOtelEventAsCLEF(s, e)
+		p.logOTelEventAsCLEF(s, e)
 	}
 
-	p.logOtelSpanAsCLEF(s)
+	p.logOTelSpanAsCLEF(s)
 }
 
 // ForceFlush is a no-op. Events are flushed on the configured interval and
@@ -121,16 +121,16 @@ func (p *LoggingSpanProcessor) Shutdown(_ context.Context) error {
 func (p *LoggingSpanProcessor) ExportSpans(_ context.Context, spans []trace.ReadOnlySpan) error {
 	for _, s := range spans {
 		for _, e := range s.Events() {
-			p.logOtelEventAsCLEF(s, e)
+			p.logOTelEventAsCLEF(s, e)
 		}
 
-		p.logOtelSpanAsCLEF(s)
+		p.logOTelSpanAsCLEF(s)
 	}
 
 	return nil
 }
 
-func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
+func (p *LoggingSpanProcessor) logOTelSpanAsCLEF(span trace.ReadOnlySpan) {
 	sc := span.SpanContext()
 	if !sc.IsValid() {
 		return
@@ -171,7 +171,7 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 	p.handler.HandleCLEFEvent(*event)
 }
 
-func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e trace.Event) {
+func (p *LoggingSpanProcessor) logOTelEventAsCLEF(span trace.ReadOnlySpan, e trace.Event) {
 	sc := span.SpanContext()
 	if !sc.IsValid() {
 		return

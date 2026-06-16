@@ -1758,34 +1758,34 @@ func Test_resolveAttr_ErrorConversionAfterReplace_Success(t *testing.T) {
 }
 
 // Expectation: An attr with an empty key and non-group value should be silently dropped.
-func Test_addResolvedAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
+func Test_resolveAndAddAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.String("", "invisible"))
+	handler.resolveAndAddAttr(dst, nil, slog.String("", "invisible"))
 
 	require.Empty(t, dst)
 }
 
 // Expectation: An anonymous group (empty key, group kind) should inline its children.
-func Test_addResolvedAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
+func Test_resolveAndAddAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("", slog.String("x", "1"), slog.Int("y", 2)))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("", slog.String("x", "1"), slog.Int("y", 2)))
 
 	require.Equal(t, "1", dst["x"])
 	require.Equal(t, int64(2), dst["y"])
 }
 
 // Expectation: A deeply nested anonymous group should still inline all children.
-func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
@@ -1794,36 +1794,36 @@ func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T)
 	dst := make(map[string]any)
 	inner := slog.Group("", slog.String("deep", "value"))
 	outer := slog.Group("", inner, slog.Int("shallow", 1))
-	handler.addResolvedAttr(dst, nil, outer)
+	handler.resolveAndAddAttr(dst, nil, outer)
 
 	require.Equal(t, "value", dst["deep"])
 	require.Equal(t, int64(1), dst["shallow"])
 }
 
 // Expectation: Named groups should create nested maps with their children inside.
-func Test_addResolvedAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
 
 	g := dst["g"].(map[string]any)
 	require.Equal(t, "v", g["k"])
 }
 
 // Expectation: Two named groups with the same key should merge their children.
-func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroupMerge_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("a", "1")))
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("b", "2")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("a", "1")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("b", "2")))
 
 	g := dst["g"].(map[string]any)
 	require.Equal(t, "1", g["a"])
@@ -1831,14 +1831,14 @@ func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
 }
 
 // Expectation: A named group with a key that collides with a non-map value should overwrite it.
-func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := map[string]any{"g": "scalar"}
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
 
 	g, ok := dst["g"].(map[string]any)
 	require.True(t, ok, "should have replaced scalar with map")
@@ -1846,7 +1846,7 @@ func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 }
 
 // Expectation: Deeply nested named groups should produce deeply nested maps.
-func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DeepNamedGroups_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
@@ -1856,7 +1856,7 @@ func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 	deep := slog.Group("l3", slog.String("leaf", "val"))
 	mid := slog.Group("l2", deep)
 	top := slog.Group("l1", mid)
-	handler.addResolvedAttr(dst, nil, top)
+	handler.resolveAndAddAttr(dst, nil, top)
 
 	l1 := dst["l1"].(map[string]any)
 	l2 := l1["l2"].(map[string]any)
@@ -1865,14 +1865,14 @@ func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 }
 
 // Expectation: A named group containing dotted key names should preserve dots literally.
-func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.String("a.b.c", "dotted"))
+	handler.resolveAndAddAttr(dst, nil, slog.String("a.b.c", "dotted"))
 
 	require.Equal(t, "dotted", dst["a.b.c"])
 	_, hasA := dst["a"]
@@ -1880,14 +1880,14 @@ func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T)
 }
 
 // Expectation: A named group whose key contains dots should be preserved as a literal key.
-func Test_addResolvedAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("x.y", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("x.y", slog.String("k", "v")))
 
 	g, ok := dst["x.y"].(map[string]any)
 	require.True(t, ok, "dotted group key should be a literal map key")
@@ -1895,7 +1895,7 @@ func Test_addResolvedAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T
 }
 
 // Expectation: ReplaceAttr dropping an attr inside a named group should exclude it.
-func Test_addResolvedAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
+func Test_resolveAndAddAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
 	t.Parallel()
 
 	opts := &slog.HandlerOptions{
@@ -1912,7 +1912,7 @@ func Test_addResolvedAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g",
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g",
 		slog.String("keep", "yes"),
 		slog.String("drop", "no"),
 	))

@@ -640,14 +640,14 @@ func Test_LoggingSpanProcessor_OnEnd_ResourceAttributes_MultipleTypes_Success(t 
 	require.InDelta(t, 3.14, events[0].ResourceAttributes["ratio"], 0.001)
 }
 
-// Expectation: logOtelSpanAsCLEF should not emit when span context is invalid.
+// Expectation: logOTelSpanAsCLEF should not emit when span context is invalid.
 func Test_LoggingSpanProcessor_OnEnd_InvalidSpanContext_NoEmit_Success(t *testing.T) {
 	t.Parallel()
 
 	processor, handler := newTestProcessor(t)
 
 	// A stubInvalidSpan returns an invalid SpanContext.
-	processor.logOtelSpanAsCLEF(&stubInvalidSpan{})
+	processor.logOTelSpanAsCLEF(&stubInvalidSpan{})
 
 	select {
 	case <-handler.Events(0):
@@ -657,13 +657,13 @@ func Test_LoggingSpanProcessor_OnEnd_InvalidSpanContext_NoEmit_Success(t *testin
 	}
 }
 
-// Expectation: logOtelEventAsCLEF should not emit when span context is invalid.
+// Expectation: logOTelEventAsCLEF should not emit when span context is invalid.
 func Test_LoggingSpanProcessor_OnEnd_InvalidSpanContext_EventNotEmitted_Success(t *testing.T) {
 	t.Parallel()
 
 	processor, handler := newTestProcessor(t)
 
-	processor.logOtelEventAsCLEF(&stubInvalidSpan{}, sdktrace.Event{
+	processor.logOTelEventAsCLEF(&stubInvalidSpan{}, sdktrace.Event{
 		Name: "should-not-appear",
 		Time: time.Now(),
 	})

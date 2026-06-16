@@ -42,7 +42,7 @@ func newHTTPClient(skipVerify bool) *http.Client {
 	}
 }
 
-func (h *SeqHandler) runBackgroundFlusher(w *worker) {
+func (h *SeqHandler) runFlusher(w *worker) {
 	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
 		return
@@ -61,29 +61,29 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		select {
 		case e, ok := <-w.eventsCh:
 			if !ok {
-				h.flushCurrentBatch(w, &events)
+				h.flushBatch(w, &events)
 
 				return
 			}
 			events = append(events, e)
 			if len(events) >= h.batchSize {
-				h.flushCurrentBatch(w, &events)
+				h.flushBatch(w, &events)
 			}
 
 		case <-tickerChan:
-			h.flushCurrentBatch(w, &events)
+			h.flushBatch(w, &events)
 		}
 	}
 }
 
-func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
+func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	if len(w.retryBuffer) > 0 {
-		leftover := h.sendWithRetry(w.retryBuffer)
+		leftover := h.sendBatch(w.retryBuffer)
 		w.retryBuffer = leftover
 	}
 
 	if len(*events) > 0 {
-		leftover := h.sendWithRetry(*events)
+		leftover := h.sendBatch(*events)
 		if leftover != nil {
 			w.retryBuffer = append(w.retryBuffer, leftover...)
 		}
@@ -98,49 +98,7 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 	}
 }
 
-func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
-	if len(events) == 0 {
-		return nil
-	}
-
-	return h.attemptSendBatch(events)
-}
-
-func encodeEvent(e CLEFEvent) map[string]any {
-	topLevel := make(map[string]any, len(e.Properties)+10) //nolint:mnd
-	maps.Copy(topLevel, e.Properties)
-
-	// Set reserved CLEF keys after copying properties to ensure they aren't overwritten
-	topLevel["@t"] = e.Timestamp.Format(time.RFC3339Nano)
-	topLevel["@m"] = e.Message
-	topLevel["@l"] = e.Level
-
-	if e.Exception != "" {
-		topLevel["@x"] = e.Exception
-	}
-	if !e.SpanStart.IsZero() {
-		topLevel["@st"] = e.SpanStart.Format(time.RFC3339Nano)
-	}
-	if e.TraceID != "" {
-		topLevel["@tr"] = e.TraceID
-	}
-	if e.SpanID != "" {
-		topLevel["@sp"] = e.SpanID
-	}
-	if e.ParentSpanID != "" {
-		topLevel["@ps"] = e.ParentSpanID
-	}
-	if len(e.ResourceAttributes) > 0 {
-		topLevel["@ra"] = dottedToNested(e.ResourceAttributes)
-	}
-	if e.SpanKind != "" {
-		topLevel["@sk"] = e.SpanKind
-	}
-
-	return topLevel
-}
-
-func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
+func (h *SeqHandler) sendBatch(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
 		return nil
 	}
@@ -187,8 +145,8 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 
 		// Split batch in half and retry via recursion
 		mid := len(events) / 2 //nolint:mnd
-		leftover := h.attemptSendBatch(events[:mid])
-		rightover := h.attemptSendBatch(events[mid:])
+		leftover := h.sendBatch(events[:mid])
+		rightover := h.sendBatch(events[mid:])
 
 		return append(leftover, rightover...)
 	}
@@ -200,6 +158,40 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 	}
 
 	return nil
+}
+
+func encodeEvent(e CLEFEvent) map[string]any {
+	topLevel := make(map[string]any, len(e.Properties)+10) //nolint:mnd
+	maps.Copy(topLevel, e.Properties)
+
+	// Set reserved CLEF keys after copying properties to ensure they aren't overwritten
+	topLevel["@t"] = e.Timestamp.Format(time.RFC3339Nano)
+	topLevel["@m"] = e.Message
+	topLevel["@l"] = e.Level
+
+	if e.Exception != "" {
+		topLevel["@x"] = e.Exception
+	}
+	if !e.SpanStart.IsZero() {
+		topLevel["@st"] = e.SpanStart.Format(time.RFC3339Nano)
+	}
+	if e.TraceID != "" {
+		topLevel["@tr"] = e.TraceID
+	}
+	if e.SpanID != "" {
+		topLevel["@sp"] = e.SpanID
+	}
+	if e.ParentSpanID != "" {
+		topLevel["@ps"] = e.ParentSpanID
+	}
+	if len(e.ResourceAttributes) > 0 {
+		topLevel["@ra"] = dottedToNested(e.ResourceAttributes)
+	}
+	if e.SpanKind != "" {
+		topLevel["@sk"] = e.SpanKind
+	}
+
+	return topLevel
 }
 
 // dottedToNested converts a flat map with dotted keys ("a.b.c") into a
