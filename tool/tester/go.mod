@@ -19,8 +19,3 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 )
-
-replace (
-	github.com/desertwitch/slog-seq => ../..
-	github.com/desertwitch/slog-seq/seqotel => ../../seqotel
-)
