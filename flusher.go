@@ -55,10 +55,6 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		tickerChan = ticker.C
 	}
 
-	purgeInterval := h.flushInterval * 60 //nolint:mnd
-	w.purgeTicker = time.NewTicker(purgeInterval)
-	defer w.purgeTicker.Stop()
-
 	events := make([]CLEFEvent, 0, h.batchSize)
 
 	for {

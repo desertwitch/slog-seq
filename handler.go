@@ -57,7 +57,6 @@ type shared struct {
 type worker struct {
 	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent
-	purgeTicker *time.Ticker
 }
 
 // attrSet holds a set of attrs with the group path they belong under. The
