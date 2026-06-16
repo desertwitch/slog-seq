@@ -202,8 +202,6 @@ func (h *SeqHandler) SourceKey() string {
 // Handle processes a log record, converting it to a CLEF event and dispatching
 // it to a worker for asynchronous delivery to Seq.
 func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
-	levelString := convertLevel(r.Level)
-
 	props := make(map[string]any, r.NumAttrs()+2) //nolint:mnd
 
 	// Process handler (non-record) attrs from WithAttrs calls. Each entry
@@ -249,7 +247,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		Timestamp:  r.Time,
 		Message:    msg,
 		Exception:  exception,
-		Level:      levelString,
+		Level:      convertLevel(r.Level),
 		Properties: props,
 	}
 
@@ -450,18 +448,18 @@ func nestInto(dst map[string]any, groups []string) map[string]any {
 func convertLevel(l slog.Level) string {
 	switch l {
 	case slog.LevelDebug:
-		return CLEFLevelDebug.String()
+		return CLEFLevelDebug
 
 	case slog.LevelInfo:
-		return CLEFLevelInformation.String()
+		return CLEFLevelInformation
 
 	case slog.LevelWarn:
-		return CLEFLevelWarning.String()
+		return CLEFLevelWarning
 
 	case slog.LevelError:
-		return CLEFLevelError.String()
+		return CLEFLevelError
 
 	default:
-		return CLEFLevelInformation.String()
+		return CLEFLevelInformation
 	}
 }

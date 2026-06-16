@@ -2,6 +2,17 @@ package slogseq
 
 import "time"
 
+// CLEF does not enforce strict log levels, but these are the commonly
+// used and understood log levels which offer the best Seq UI experience.
+const (
+	CLEFLevelDebug       string = "Debug"
+	CLEFLevelVerbose     string = "Verbose"
+	CLEFLevelInformation string = "Information"
+	CLEFLevelWarning     string = "Warning"
+	CLEFLevelError       string = "Error"
+	CLEFLevelFatal       string = "Fatal"
+)
+
 // CLEFEvent represents a log event in CLEF (Compact Log Event Format), the
 // JSON-based format used by Seq. See https://clef-json.org for the
 // specification.
@@ -17,7 +28,7 @@ type CLEFEvent struct {
 	// continuation of a multi-line message.
 	Exception string `json:"@x,omitempty"`
 
-	// Level is the severity of the event (e.g. "Information", "Error").
+	// Level describes the severity of the event (see CLEFLevel* constants).
 	Level string `json:"@l"`
 
 	// Properties holds structured key-value data attached to the event. These
@@ -30,43 +41,15 @@ type CLEFEvent struct {
 	// SpanID is a telemetry span identifier, if present.
 	SpanID string `json:"@sp,omitempty"`
 
-	// SpanStart is the start time of the span, if present.
+	// SpanStart is the start time of the telemetry span, if present.
 	SpanStart time.Time `json:"@st,omitzero"`
 
-	// SpanKind is the telemetry span kind ("server", "client"), if present.
+	// SpanKind is the telemetry span kind, if present.
 	SpanKind string `json:"@sk,omitempty"`
 
 	// ResourceAttributes holds telemetry resource attributes, if present.
 	ResourceAttributes map[string]any `json:"@ra,omitempty,omitzero"`
 
-	// ParentSpanID is the span identifier of the parent span, if present.
+	// ParentSpanID is the identifier of the parent telemetry span, if present.
 	ParentSpanID string `json:"@ps,omitempty"`
-}
-
-// CLEFLevel represents a CLEF severity level as defined by the Seq server.
-type CLEFLevel string
-
-const (
-	// CLEFLevelDebug is the lowest standard severity level.
-	CLEFLevelDebug CLEFLevel = "Debug"
-
-	// CLEFLevelVerbose is between Debug and Information.
-	CLEFLevelVerbose CLEFLevel = "Verbose"
-
-	// CLEFLevelInformation is the default severity level.
-	CLEFLevelInformation CLEFLevel = "Information"
-
-	// CLEFLevelWarning indicates a potential problem.
-	CLEFLevelWarning CLEFLevel = "Warning"
-
-	// CLEFLevelError indicates a failure.
-	CLEFLevelError CLEFLevel = "Error"
-
-	// CLEFLevelFatal indicates an unrecoverable failure.
-	CLEFLevelFatal CLEFLevel = "Fatal"
-)
-
-// String returns the CLEF level as a string.
-func (l CLEFLevel) String() string {
-	return string(l)
 }

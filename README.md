@@ -174,7 +174,7 @@ defer handler.Close()
 handler.HandleCLEFEvent(slogseq.CLEFEvent{
     Timestamp: time.Now(),
     Message:   "forwarded from syslog",
-    Level:     slogseq.CLEFLevelInformation.String(),
+    Level:     slogseq.CLEFLevelInformation,
     Properties: map[string]any{
         "facility": "kern",
         "hostname": "router-01",
