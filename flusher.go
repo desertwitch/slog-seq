@@ -1,6 +1,7 @@
 package slogseq
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -104,12 +105,20 @@ func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	}
 
 	var sb strings.Builder
-	enc := json.NewEncoder(&sb)
+	var tmp bytes.Buffer
+	enc := json.NewEncoder(&tmp)
 	for _, e := range events {
-		topLevel := encodeEvent(e)
-		if err := enc.Encode(topLevel); err != nil {
-			return events
+		tmp.Reset()
+		clef := encodeEvent(e)
+		if err := enc.Encode(clef); err != nil {
+			h.errorHandlerFunc(fmt.Errorf("dropping unencodable event: %w", err))
+
+			continue
 		}
+		sb.Write(tmp.Bytes())
+	}
+	if sb.Len() == 0 {
+		return nil
 	}
 
 	req, err := http.NewRequest(http.MethodPost, h.seqURL, strings.NewReader(sb.String())) //nolint:noctx

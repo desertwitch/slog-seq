@@ -1309,31 +1309,78 @@ func Test_sendEvents_InvalidURL_ReturnsEvents_Success(t *testing.T) {
 	require.Error(t, capturedErr)
 }
 
-// Expectation: sendEvents should return events when JSON encoding fails.
-func Test_sendEvents_JSONEncodeFailure_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should drop unencodable events and send the rest.
+func Test_sendEvents_DropsUnencodableEvent_SendsRest_Success(t *testing.T) {
 	t.Parallel()
 
-	called := false
+	var capturedBody string
+	var errCount int
+
 	handler := &SeqHandler{
 		shared: &shared{
-			client:           GetHTTPClientMock(200, "ok", func() { called = true }),
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						capturedBody = string(body)
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
 			seqURL:           "http://example.com",
-			errorHandlerFunc: func(_ error) {},
+			errorHandlerFunc: func(_ error) { errCount++ },
 		},
 	}
 
 	events := []CLEFEvent{
-		{
-			Message:    "e1",
-			Timestamp:  time.Now(),
-			Properties: map[string]any{"bad": make(chan int)},
-		},
+		{Message: "good1", Timestamp: time.Now()},
+		{Message: "bad", Timestamp: time.Now(), Properties: map[string]any{"poison": make(chan int)}},
+		{Message: "good2", Timestamp: time.Now()},
 	}
 
 	result := handler.sendEvents(events)
 
-	require.Len(t, result, 1)
-	require.False(t, called, "HTTP client should not be called when encoding fails")
+	require.Nil(t, result, "good events should have been sent successfully")
+	require.Equal(t, 1, errCount, "error handler should be called once for the bad event")
+
+	lines := strings.Split(strings.TrimSpace(capturedBody), "\n")
+	require.Len(t, lines, 2, "only the two good events should be in the request")
+
+	var first, second map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
+	require.NoError(t, json.Unmarshal([]byte(lines[1]), &second))
+	require.Equal(t, "good1", first["@m"])
+	require.Equal(t, "good2", second["@m"])
+}
+
+// Expectation: sendEvents should return nil when all events are unencodable.
+func Test_sendEvents_AllUnencodable_ReturnsNil_Success(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	errCount := 0
+	handler := &SeqHandler{
+		shared: &shared{
+			client:           GetHTTPClientMock(200, "ok", func() { called = true }),
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(_ error) { errCount++ },
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "bad1", Timestamp: time.Now(), Properties: map[string]any{"a": make(chan int)}},
+		{Message: "bad2", Timestamp: time.Now(), Properties: map[string]any{"b": make(chan int)}},
+	}
+
+	result := handler.sendEvents(events)
+
+	require.Nil(t, result, "all events dropped, nothing to retry")
+	require.False(t, called, "HTTP client should not be called when no events survive encoding")
+	require.Equal(t, 2, errCount, "error callback should have been called")
 }
 
 // Expectation: encodeEvent should set all required CLEF keys.
