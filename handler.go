@@ -192,6 +192,9 @@ func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 
 // SourceKey returns the key used for source location information when AddSource
 // is enabled in the handler options.
+//
+// Deprecated: SourceKey is scheduled for removal in a future version, you
+// should record a used SourceKey at [SeqHandler] construction time instead.
 func (h *SeqHandler) SourceKey() string {
 	return h.sourceKey
 }

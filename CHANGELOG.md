@@ -12,6 +12,8 @@ For earlier changes, please refer instead to the Git commit log.
 ## v0.7.1 - 2026-06-16
 ### Added
 * Added `SeqHandler.Ping()` ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+### Deprecated
+* `SeqHandler.SourceKey()` is now deprecated ([#13](https://github.com/desertwitch/slog-seq/pull/13))
 
 ## v0.7.0 - 2026-06-16
 ### Added
