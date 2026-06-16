@@ -20,10 +20,11 @@
 **slog-seq** is a library for sending logs to a [Seq](https://datalust.co/seq) server, as a handler for Go's structured logging [slog](https://go.dev/blog/slog).
 
 - [Installation](#installation)
-- [Quick start](#quick-start)
-- [HTTP client](#http-client)
-- [Multiple workers](#multiple-workers)
+- [Quick Start](#quick-start)
+- [HTTP Client](#http-client)
+- [Multiple Workers](#multiple-workers)
 - [OpenTelemetry](#opentelemetry)
+- [Custom Integrations](#custom-integrations)
 - [Benchmarks](#benchmarks)
 - [License](#license)
 
@@ -39,7 +40,7 @@ For [OpenTelemetry](#opentelemetry) trace correlation and span forwarding:
 go get github.com/desertwitch/slog-seq/seqotel
 ```
 
-## Quick start
+## Quick Start
 
 Handlers can be constructed through `NewSeqHandler`.
 
@@ -86,13 +87,13 @@ and pass it to the `NewSeqHandler` function with `slogseq.WithHandlerOptions(opt
 
 **See the [package documentation](https://pkg.go.dev/github.com/desertwitch/slog-seq) for all available options.**
 
-## HTTP client
+## HTTP Client
 
 If you need to disable TLS certificate verification, you can do so by using the option `slogseq.WithInsecure()`.
 
 Alternatively, you can provide your own HTTP client by using the option `slogseq.WithHTTPClient(client)`.
 
-## Multiple workers
+## Multiple Workers
 
 You can set the number of workers that send logs to the Seq server by using the option `slogseq.WithWorkers(n)`.
 
@@ -151,6 +152,35 @@ span.End()
 ![Seq with traces](./doc/seq_screenshot.png)
 
 **See the [package documentation](https://pkg.go.dev/github.com/desertwitch/slog-seq/seqotel) for more information.**
+
+## Custom Integrations
+
+`SeqHandler.HandleCLEFEvent` accepts pre-built CLEF events directly, bypassing
+slog entirely. This lets you use the handler's batching, retry, and worker
+machinery from any event source - syslog forwarders, custom protocols, queue
+consumers, or anything that can produce a `CLEFEvent`.
+
+```go
+import (
+	slogseq "github.com/desertwitch/slog-seq"
+)
+
+handler := slogseq.NewSeqHandler("http://your-seq-server/ingest/clef",
+    slogseq.WithAPIKey("your-api-key"),
+    slogseq.WithBatchSize(50),
+)
+defer handler.Close()
+
+handler.HandleCLEFEvent(slogseq.CLEFEvent{
+    Timestamp: time.Now(),
+    Message:   "forwarded from syslog",
+    Level:     slogseq.CLEFLevelInformation.String(),
+    Properties: map[string]any{
+        "facility": "kern",
+        "hostname": "router-01",
+    },
+})
+```
 
 ## Benchmarks
 

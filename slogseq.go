@@ -122,10 +122,10 @@ func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 	})
 }
 
-// WithInsecure disables SSL certificate verification. Has no effect if
+// WithInsecure disables TLS certificate verification. Has no effect if
 // WithHTTPClient is also set, the custom client controls its own configuration.
 //
-// If unset, the default is to allow only valid SSL certificates.
+// If unset, the default is to allow only valid certificates.
 func WithInsecure() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.disableTLSVerify = true
