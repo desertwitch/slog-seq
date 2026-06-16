@@ -948,7 +948,6 @@ func Test_attemptSendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 		name   string
 		status int
 	}{
-		{name: "400 bad request", status: 400},
 		{name: "401 unauthorized", status: 401},
 		{name: "403 forbidden", status: 403},
 		{name: "404 not found", status: 404},
@@ -1178,6 +1177,107 @@ func Test_attemptSendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
 
 	require.Empty(t, leftover, "expected single oversized event to be dropped")
 	require.True(t, errorCalled, "expected error handler to be called when dropping oversized event")
+}
+
+// Expectation: The function should split oversized batches and send them in smaller chunks.
+func Test_attemptSendBatch_SplitsOnBadRequest_Success(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var sentBatches []int
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						lines := strings.Count(strings.TrimSpace(string(body)), "\n") + 1
+
+						mu.Lock()
+						defer mu.Unlock()
+
+						// Reject batches larger than 2 events
+						if lines > 2 {
+							return &http.Response{
+								StatusCode: http.StatusBadRequest,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						}
+
+						sentBatches = append(sentBatches, lines)
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(err error) {},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+		{Message: "e3", Timestamp: time.Now()},
+		{Message: "e4", Timestamp: time.Now()},
+		{Message: "e5", Timestamp: time.Now()},
+		{Message: "e6", Timestamp: time.Now()},
+	}
+
+	leftover := handler.attemptSendBatch(events)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Empty(t, leftover, "expected no leftover events")
+
+	// All events should have been sent in batches of 1 or 2
+	total := 0
+	for _, n := range sentBatches {
+		require.LessOrEqual(t, n, 2, "batch should have been split to at most 2")
+		total += n
+	}
+
+	require.Equal(t, len(events), total, "expected all events to be sent")
+}
+
+// Expectation: The function should drop a single event that is malformed.
+func Test_attemptSendBatch_DropsBadRequestSingleEvent_Success(t *testing.T) {
+	t.Parallel()
+
+	var errorCalled bool
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						return &http.Response{
+							StatusCode: http.StatusBadRequest,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL: "http://example.com",
+			errorHandlerFunc: func(err error) {
+				errorCalled = true
+			},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "malformed event", Timestamp: time.Now()},
+	}
+
+	leftover := handler.attemptSendBatch(events)
+
+	require.Empty(t, leftover, "expected single malformed event to be dropped")
+	require.True(t, errorCalled, "expected error handler to be called when dropping malformed event")
 }
 
 // Expectation: The function should return leftover events from the failed half of a split batch.

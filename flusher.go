@@ -177,7 +177,8 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode == http.StatusRequestEntityTooLarge {
+	// Both of these can poison the whole batch, so we split the batch until they're a single event.
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge {
 		if len(events) == 1 {
 			h.errorHandlerFunc(errors.New("dropping single event; size exceeds Seq server limit"))
 
