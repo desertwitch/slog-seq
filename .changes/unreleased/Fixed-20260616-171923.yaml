@@ -1,6 +1,0 @@
-kind: Fixed
-body: Do not allow single event to poison batch on status code 400
-time: 2026-06-16T17:19:23.37436887+02:00
-custom:
-    Issue: ""
-    PR: "13"

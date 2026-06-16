@@ -9,6 +9,10 @@ Recording of changes began after release version 0.6.0.
 For earlier changes, please refer instead to the Git commit log.
 
 
+## v0.8.0 - 2026-06-16
+### Changed
+* Adapted to slog-seq v0.8.0 changes ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+
 ## v0.7.0 - 2026-06-16
 ### Added
 * `NewSeqOTelHandler` as new primary entry-point to establish OTel `slog.Handler` ([#9](https://github.com/desertwitch/slog-seq/pull/9))

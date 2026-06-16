@@ -1,6 +1,0 @@
-kind: Changed
-body: '`CLEFLevel` type replaced with string-type `CLEFLevel*` consts'
-time: 2026-06-16T17:06:55.015300437+02:00
-custom:
-    Issue: ""
-    PR: "13"

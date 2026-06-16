@@ -1,6 +1,0 @@
-kind: Changed
-body: Adapted to slog-seq v0.8.0 changes
-time: 2026-06-16T17:39:19.384414361+02:00
-custom:
-    Issue: ""
-    PR: "13"
