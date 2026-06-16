@@ -711,8 +711,8 @@ func Test_flushBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.T) {
 	require.False(t, dropCalled, "should not drop when exactly at limit")
 }
 
-// Expectation: sendBatch with empty input should return nil without making HTTP calls.
-func Test_sendBatch_EmptyInput_ReturnsNil_Success(t *testing.T) {
+// Expectation: sendEvents with empty input should return nil without making HTTP calls.
+func Test_sendEvents_EmptyInput_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
 
 	called := false
@@ -724,17 +724,17 @@ func Test_sendBatch_EmptyInput_ReturnsNil_Success(t *testing.T) {
 		},
 	}
 
-	result := handler.sendBatch(nil)
+	result := handler.sendEvents(nil)
 	require.Nil(t, result)
 	require.False(t, called, "HTTP client should not be called for empty input")
 
-	result = handler.sendBatch([]CLEFEvent{})
+	result = handler.sendEvents([]CLEFEvent{})
 	require.Nil(t, result)
 	require.False(t, called)
 }
 
-// Expectation: sendBatch should set Content-Type and API key headers.
-func Test_sendBatch_SetsHeaders_Success(t *testing.T) {
+// Expectation: sendEvents should set Content-Type and API key headers.
+func Test_sendEvents_SetsHeaders_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedReq *http.Request
@@ -763,15 +763,15 @@ func Test_sendBatch_SetsHeaders_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.sendBatch(events)
+	handler.sendEvents(events)
 
 	require.NotNil(t, capturedReq)
 	require.Equal(t, "application/vnd.serilog.clef", capturedReq.Header.Get("Content-Type"))
 	require.Equal(t, "my-api-key", capturedReq.Header.Get("X-Seq-ApiKey"))
 }
 
-// Expectation: sendBatch should omit API key header when apiKey is empty.
-func Test_sendBatch_EmptyAPIKey_NoHeader_Success(t *testing.T) {
+// Expectation: sendEvents should omit API key header when apiKey is empty.
+func Test_sendEvents_EmptyAPIKey_NoHeader_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedReq *http.Request
@@ -800,14 +800,14 @@ func Test_sendBatch_EmptyAPIKey_NoHeader_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.sendBatch(events)
+	handler.sendEvents(events)
 
 	require.NotNil(t, capturedReq)
 	require.Empty(t, capturedReq.Header.Get("X-Seq-ApiKey"))
 }
 
-// Expectation: sendBatch should send valid CLEF JSON lines in the request body.
-func Test_sendBatch_SendsValidCLEFBody_Success(t *testing.T) {
+// Expectation: sendEvents should send valid CLEF JSON lines in the request body.
+func Test_sendEvents_SendsValidCLEFBody_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedBody string
@@ -838,7 +838,7 @@ func Test_sendBatch_SendsValidCLEFBody_Success(t *testing.T) {
 		{Message: "second", Level: "Warning", Timestamp: now},
 	}
 
-	handler.sendBatch(events)
+	handler.sendEvents(events)
 
 	lines := strings.Split(strings.TrimSpace(capturedBody), "\n")
 	require.Len(t, lines, 2)
@@ -854,8 +854,8 @@ func Test_sendBatch_SendsValidCLEFBody_Success(t *testing.T) {
 	}
 }
 
-// Expectation: sendBatch should return events and call error handler on HTTP client error.
-func Test_sendBatch_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler on HTTP client error.
+func Test_sendEvents_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedErr error
@@ -878,15 +878,15 @@ func Test_sendBatch_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	result := handler.sendBatch(events)
+	result := handler.sendEvents(events)
 
 	require.Len(t, result, 1)
 	require.Error(t, capturedErr)
 	require.Contains(t, capturedErr.Error(), "connection refused")
 }
 
-// Expectation: sendBatch should return events and call error handler on non-2xx status.
-func Test_sendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler on non-2xx status.
+func Test_sendEvents_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -917,7 +917,7 @@ func Test_sendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 				{Message: "e1", Timestamp: time.Now()},
 			}
 
-			result := handler.sendBatch(events)
+			result := handler.sendEvents(events)
 
 			require.Len(t, result, 1, "events should be returned for status %d", tt.status)
 			require.True(t, errCalled, "error handler should be called for status %d", tt.status)
@@ -925,8 +925,8 @@ func Test_sendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 	}
 }
 
-// Expectation: sendBatch should accept all 2xx status codes.
-func Test_sendBatch_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
+// Expectation: sendEvents should accept all 2xx status codes.
+func Test_sendEvents_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
 
 	for status := 200; status <= 299; status++ {
@@ -945,15 +945,15 @@ func Test_sendBatch_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
 				{Message: "e1", Timestamp: time.Now()},
 			}
 
-			result := handler.sendBatch(events)
+			result := handler.sendEvents(events)
 
 			require.Nil(t, result)
 		})
 	}
 }
 
-// Expectation: sendBatch should POST to the configured seqURL.
-func Test_sendBatch_PostsToConfiguredURL_Success(t *testing.T) {
+// Expectation: sendEvents should POST to the configured seqURL.
+func Test_sendEvents_PostsToConfiguredURL_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedURL string
@@ -983,14 +983,14 @@ func Test_sendBatch_PostsToConfiguredURL_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.sendBatch(events)
+	handler.sendEvents(events)
 
 	require.Equal(t, "http://my-seq-server:5341/api/events/raw", capturedURL)
 	require.Equal(t, "POST", capturedMethod)
 }
 
-// Expectation: sendBatch should use POST method.
-func Test_sendBatch_UsesPostMethod_Success(t *testing.T) {
+// Expectation: sendEvents should use POST method.
+func Test_sendEvents_UsesPostMethod_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedMethod string
@@ -1018,13 +1018,13 @@ func Test_sendBatch_UsesPostMethod_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.sendBatch(events)
+	handler.sendEvents(events)
 
 	require.Equal(t, http.MethodPost, capturedMethod)
 }
 
 // Expectation: The function should split oversized batches and send them in smaller chunks.
-func Test_sendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
+func Test_sendEvents_SplitsOnRequestTooLarge_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1072,7 +1072,7 @@ func Test_sendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
 		{Message: "e6", Timestamp: time.Now()},
 	}
 
-	leftover := handler.sendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1090,7 +1090,7 @@ func Test_sendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
 }
 
 // Expectation: The function should drop a single event that exceeds the server size limit.
-func Test_sendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
+func Test_sendEvents_DropsOversizedSingleEvent_Success(t *testing.T) {
 	t.Parallel()
 
 	var errorCalled bool
@@ -1118,14 +1118,14 @@ func Test_sendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
 		{Message: "huge event", Timestamp: time.Now()},
 	}
 
-	leftover := handler.sendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	require.Empty(t, leftover, "expected single oversized event to be dropped")
 	require.True(t, errorCalled, "expected error handler to be called when dropping oversized event")
 }
 
 // Expectation: The function should split oversized batches and send them in smaller chunks.
-func Test_sendBatch_SplitsOnBadRequest_Success(t *testing.T) {
+func Test_sendEvents_SplitsOnBadRequest_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1173,7 +1173,7 @@ func Test_sendBatch_SplitsOnBadRequest_Success(t *testing.T) {
 		{Message: "e6", Timestamp: time.Now()},
 	}
 
-	leftover := handler.sendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1191,7 +1191,7 @@ func Test_sendBatch_SplitsOnBadRequest_Success(t *testing.T) {
 }
 
 // Expectation: The function should drop a single event that is malformed.
-func Test_sendBatch_DropsBadRequestSingleEvent_Success(t *testing.T) {
+func Test_sendEvents_DropsBadRequestSingleEvent_Success(t *testing.T) {
 	t.Parallel()
 
 	var errorCalled bool
@@ -1219,14 +1219,14 @@ func Test_sendBatch_DropsBadRequestSingleEvent_Success(t *testing.T) {
 		{Message: "malformed event", Timestamp: time.Now()},
 	}
 
-	leftover := handler.sendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	require.Empty(t, leftover, "expected single malformed event to be dropped")
 	require.True(t, errorCalled, "expected error handler to be called when dropping malformed event")
 }
 
 // Expectation: The function should return leftover events from the failed half of a split batch.
-func Test_sendBatch_PartialFail_ReturnsLeftover_Success(t *testing.T) {
+func Test_sendEvents_PartialFail_ReturnsLeftover_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1279,15 +1279,15 @@ func Test_sendBatch_PartialFail_ReturnsLeftover_Success(t *testing.T) {
 		{Message: "e4", Timestamp: time.Now()},
 	}
 
-	leftover := handler.sendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	require.Len(t, leftover, 2, "expected 2 leftover events from failed right half")
 	require.Equal(t, "e3", leftover[0].Message)
 	require.Equal(t, "e4", leftover[1].Message)
 }
 
-// Expectation: sendBatch should return events and call error handler when request creation fails.
-func Test_sendBatch_InvalidURL_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler when request creation fails.
+func Test_sendEvents_InvalidURL_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedErr error
@@ -1303,14 +1303,14 @@ func Test_sendBatch_InvalidURL_ReturnsEvents_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	result := handler.sendBatch(events)
+	result := handler.sendEvents(events)
 
 	require.Len(t, result, 1)
 	require.Error(t, capturedErr)
 }
 
-// Expectation: sendBatch should return events when JSON encoding fails.
-func Test_sendBatch_JSONEncodeFailure_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events when JSON encoding fails.
+func Test_sendEvents_JSONEncodeFailure_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	called := false
@@ -1330,7 +1330,7 @@ func Test_sendBatch_JSONEncodeFailure_ReturnsEvents_Success(t *testing.T) {
 		},
 	}
 
-	result := handler.sendBatch(events)
+	result := handler.sendEvents(events)
 
 	require.Len(t, result, 1)
 	require.False(t, called, "HTTP client should not be called when encoding fails")

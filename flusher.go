@@ -78,12 +78,12 @@ func (h *SeqHandler) runFlusher(w *worker) {
 
 func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	if len(w.retryBuffer) > 0 {
-		leftover := h.sendBatch(w.retryBuffer)
+		leftover := h.sendEvents(w.retryBuffer)
 		w.retryBuffer = leftover
 	}
 
 	if len(*events) > 0 {
-		leftover := h.sendBatch(*events)
+		leftover := h.sendEvents(*events)
 		if leftover != nil {
 			w.retryBuffer = append(w.retryBuffer, leftover...)
 		}
@@ -98,7 +98,7 @@ func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	}
 }
 
-func (h *SeqHandler) sendBatch(events []CLEFEvent) []CLEFEvent {
+func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
 		return nil
 	}
@@ -145,8 +145,8 @@ func (h *SeqHandler) sendBatch(events []CLEFEvent) []CLEFEvent {
 
 		// Split batch in half and retry via recursion
 		mid := len(events) / 2 //nolint:mnd
-		leftover := h.sendBatch(events[:mid])
-		rightover := h.sendBatch(events[mid:])
+		leftover := h.sendEvents(events[:mid])
+		rightover := h.sendEvents(events[mid:])
 
 		return append(leftover, rightover...)
 	}
