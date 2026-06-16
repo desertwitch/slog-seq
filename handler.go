@@ -33,7 +33,7 @@ type shared struct {
 	flushInterval    time.Duration
 	disableTLSVerify bool
 	workerCount      int
-	nonBlocking      bool
+	blockingMode     bool
 	noFlush          bool
 	eventEnrichers   []func(context.Context, *CLEFEvent)
 
@@ -106,8 +106,8 @@ func NewSeqHandler(seqURL string, opts ...SeqOption) *SeqHandler {
 			batchSize:       defaultBatchSize,
 			flushInterval:   defaultFlushInterval,
 			workerCount:     defaultWorkerCount,
-			nonBlocking:     !defaultSendBlocking,
 			noFlush:         defaultDisableFlushing,
+			blockingMode:    defaultSendBlocking,
 		},
 
 		sourceKey: slog.SourceKey,
@@ -232,21 +232,21 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	}
 
 	idx := h.next.Add(1) % uint32(len(h.workers)) //nolint:gosec
-	if h.nonBlocking {
-		// send to channel, drop if full
-		select {
-		case h.workers[idx].eventsCh <- event:
-			// success
-		default:
-			// channel full, drop event
-		}
-	} else {
+	if h.blockingMode {
 		// blocking send
 		select {
 		case h.workers[idx].eventsCh <- event:
 			// success
 		case <-h.closeCh:
 			// unblock on close, drop event
+		}
+	} else {
+		// send to channel, drop if full
+		select {
+		case h.workers[idx].eventsCh <- event:
+			// success
+		default:
+			// channel full, drop event
 		}
 	}
 }

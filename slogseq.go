@@ -64,7 +64,7 @@ func WithBatchSize(batchSize int) SeqOption {
 
 // WithBufferSize sets the event channel capacity per worker. In non-blocking
 // mode, events are dropped when the buffer is full. In blocking mode, Handle
-// blocks until space is available.
+// blocks until space is available (see [WithBlocking]).
 //
 // If unset, or less than 1, the default is 1000.
 func WithBufferSize(n int) SeqOption {
@@ -192,14 +192,15 @@ func WithWorkers(count int) SeqOption {
 	})
 }
 
-// WithNonBlocking controls whether Handle blocks when the worker channel is
-// full. When true, events are dropped silently. When false, Handle blocks until
-// space becomes available or the handler is closed.
+// WithBlocking causes the handler to block when the worker channel (see
+// [WithBufferSize]) is full, waiting until space becomes available or the
+// handler is closed.
 //
-// If unset, the default is true (non-blocking) operation.
-func WithNonBlocking(nonBlocking bool) SeqOption {
+// By default, the handler is non-blocking and silently drops events
+// when the channel is full.
+func WithBlocking() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		h.nonBlocking = nonBlocking
+		h.blockingMode = true
 
 		return h
 	})

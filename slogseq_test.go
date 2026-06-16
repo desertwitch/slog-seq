@@ -428,30 +428,17 @@ func Test_WithWorkers_Negative_FallsBackToDefault_Success(t *testing.T) {
 	require.Equal(t, defaultWorkerCount, handler.workerCount)
 }
 
-// Expectation: WithNonBlocking true should set non-blocking mode.
-func Test_WithNonBlocking_True_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithNonBlocking(true),
-		WithNoFlush(),
-	)
-	defer handler.Close()
-
-	require.True(t, handler.nonBlocking)
-}
-
-// Expectation: WithNonBlocking false should set blocking mode.
+// Expectation: WithBlocking should set blocking mode.
 func Test_WithNonBlocking_False_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake",
-		WithNonBlocking(false),
+		WithBlocking(),
 		WithNoFlush(),
 	)
 	defer handler.Close()
 
-	require.False(t, handler.nonBlocking)
+	require.True(t, handler.blockingMode)
 }
 
 // Expectation: WithErrorHandlerFunc should set the error handler function.

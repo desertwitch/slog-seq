@@ -67,7 +67,7 @@ func Test_NewSeqHandler_Defaults_Success(t *testing.T) {
 	require.Equal(t, defaultRetryBufferSize, handler.retryBufferSize)
 	require.Equal(t, defaultFlushInterval, handler.flushInterval)
 	require.Equal(t, defaultWorkerCount, handler.workerCount)
-	require.True(t, handler.nonBlocking, "default should be non-blocking")
+	require.False(t, handler.blockingMode, "default should be non-blocking")
 	require.False(t, handler.disableTLSVerify)
 	require.Equal(t, slog.SourceKey, handler.sourceKey)
 	require.Nil(t, handler.options.Level)
@@ -791,7 +791,6 @@ func Test_SeqHandler_Handle_NonBlocking_DropsOnFullChannel_Success(t *testing.T)
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		WithNonBlocking(true),
 		WithNoFlush(),
 	)
 	defer handler.Close()
@@ -980,7 +979,7 @@ func Test_SeqHandler_Close_BlockingClose_UnblocksSenders_Success(t *testing.T) {
 
 	_, handler := NewLogger("http://fake",
 		WithWorkers(1),
-		WithNonBlocking(false),
+		WithBlocking(),
 		WithNoFlush(),
 	)
 
