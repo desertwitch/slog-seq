@@ -3,14 +3,12 @@ module github.com/desertwitch/slog-seq/seqotel
 go 1.25.0
 
 require (
-	github.com/desertwitch/slog-seq v0.7.0
+	github.com/desertwitch/slog-seq v0.8.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 )
-
-replace github.com/desertwitch/slog-seq => ..
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
