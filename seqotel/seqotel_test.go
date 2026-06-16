@@ -33,7 +33,7 @@ func newTestProcessor(t *testing.T) (*LoggingSpanProcessor, *SeqOTelHandler) {
 	)
 	t.Cleanup(func() { _ = handler.Close() })
 
-	return &LoggingSpanProcessor{Handler: handler}, handler
+	return &LoggingSpanProcessor{handler: handler}, handler
 }
 
 func newTestTracerProvider(processor *LoggingSpanProcessor, res *resource.Resource) *sdktrace.TracerProvider {
@@ -94,7 +94,7 @@ func Test_NewLoggingSpanProcessor_ReturnsProcessor_Success(t *testing.T) {
 	processor := NewLoggingSpanProcessor(handler)
 
 	require.NotNil(t, processor)
-	require.Same(t, handler, processor.Handler)
+	require.Same(t, handler, processor.handler)
 }
 
 // Expectation: Without a span context, TraceID and SpanID should remain empty.

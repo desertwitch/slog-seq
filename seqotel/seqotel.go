@@ -78,13 +78,13 @@ func NewSeqOTelHandler(seqURL string, opts ...slogseq.SeqOption) *SeqOTelHandler
 // ordering. The processor does not manage the handler's lifecycle - the caller
 // is responsible for closing the handler.
 type LoggingSpanProcessor struct {
-	Handler *SeqOTelHandler
+	handler *SeqOTelHandler
 }
 
 // NewLoggingSpanProcessor creates a [LoggingSpanProcessor] that forwards
 // completed spans to Seq via the given [SeqOTelHandler].
 func NewLoggingSpanProcessor(handler *SeqOTelHandler) *LoggingSpanProcessor {
-	return &LoggingSpanProcessor{Handler: handler}
+	return &LoggingSpanProcessor{handler: handler}
 }
 
 // OnStart is a no-op. This processor only acts on completed spans.
@@ -168,7 +168,7 @@ func (p *LoggingSpanProcessor) logOtelSpanAsCLEF(span trace.ReadOnlySpan) {
 		}
 	}
 
-	p.Handler.HandleCLEFEvent(*event)
+	p.handler.HandleCLEFEvent(*event)
 }
 
 func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e trace.Event) {
@@ -207,7 +207,7 @@ func (p *LoggingSpanProcessor) logOtelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		}
 	}
 
-	p.Handler.HandleCLEFEvent(*event)
+	p.handler.HandleCLEFEvent(*event)
 }
 
 // resourceAttrs flattens the span's OTel Resource into a map suitable for
