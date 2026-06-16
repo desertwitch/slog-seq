@@ -190,15 +190,6 @@ func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	return true
 }
 
-// SourceKey returns the key used for source location information when AddSource
-// is enabled in the handler options.
-//
-// Deprecated: SourceKey is scheduled for removal in a future version, you
-// should record a used SourceKey at [SeqHandler] construction time instead.
-func (h *SeqHandler) SourceKey() string {
-	return h.sourceKey
-}
-
 // Handle processes a log record, converting it to a CLEF event and dispatching
 // it to a worker for asynchronous delivery to Seq.
 func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {

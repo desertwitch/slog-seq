@@ -436,31 +436,6 @@ func Test_SeqHandler_Ping_StripsQueryParams_Success(t *testing.T) {
 	require.Empty(t, capturedRawQuery)
 }
 
-// Expectation: SourceKey should return the configured source key.
-func Test_SeqHandler_SourceKey_ReturnsConfigured_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithSourceKey("mysource"),
-		WithNoFlush(),
-	)
-	defer handler.Close()
-
-	require.Equal(t, "mysource", handler.SourceKey())
-}
-
-// Expectation: SourceKey should return the default slog.SourceKey when not customized.
-func Test_SeqHandler_SourceKey_ReturnsDefault_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithNoFlush(),
-	)
-	defer handler.Close()
-
-	require.Equal(t, slog.SourceKey, handler.SourceKey())
-}
-
 // Expectation: Handle should return nil error on success.
 func Test_SeqHandler_Handle_ReturnsNilError_Success(t *testing.T) {
 	t.Parallel()
