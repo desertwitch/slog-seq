@@ -48,8 +48,12 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		return
 	}
 
-	ticker := time.NewTicker(h.flushInterval)
-	defer ticker.Stop()
+	var tickerChan <-chan time.Time
+	if h.flushInterval > 0 {
+		ticker := time.NewTicker(h.flushInterval)
+		defer ticker.Stop()
+		tickerChan = ticker.C
+	}
 
 	purgeInterval := h.flushInterval * 60 //nolint:mnd
 	w.purgeTicker = time.NewTicker(purgeInterval)
@@ -70,7 +74,7 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 				h.flushCurrentBatch(w, &events)
 			}
 
-		case <-ticker.C:
+		case <-tickerChan:
 			h.flushCurrentBatch(w, &events)
 		}
 	}

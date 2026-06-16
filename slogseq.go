@@ -80,7 +80,8 @@ func WithBufferSize(n int) SeqOption {
 }
 
 // WithRetryBufferSize sets the maximum number of failed events held for retry
-// per worker. When full, the oldest events are dropped.
+// per worker. When full, the oldest unsent events (at this point usually
+// retried several times) are dropped.
 //
 // If unset, or less than 1, the default is 1000.
 func WithRetryBufferSize(n int) SeqOption {
@@ -98,10 +99,11 @@ func WithRetryBufferSize(n int) SeqOption {
 // WithFlushInterval sets the interval at which to flush the batch, even if the
 // batch size has not been reached.
 //
-// If unset, or less than 1, the default is 2 seconds.
+// If unset, or less than zero, the default is 2 seconds.
+// If zero, periodic flushing is disabled (and only [WithBatchSize] observed).
 func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
-		if flushInterval < 1 {
+		if flushInterval < 0 {
 			flushInterval = defaultFlushInterval
 		}
 
@@ -111,7 +113,7 @@ func WithFlushInterval(flushInterval time.Duration) SeqOption {
 	})
 }
 
-// WithHandlerOptions sets the slog handler options.
+// WithHandlerOptions sets [slog.HandlerOptions] on the handler.
 func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.options = *opts
@@ -120,10 +122,10 @@ func WithHandlerOptions(opts *slog.HandlerOptions) SeqOption {
 	})
 }
 
-// WithInsecure disables TLS certificate verification. Has no effect if
+// WithInsecure disables SSL certificate verification. Has no effect if
 // WithHTTPClient is also set, the custom client controls its own configuration.
 //
-// If unset, the default is to allow only valid certificates.
+// If unset, the default is to allow only valid SSL certificates.
 func WithInsecure() SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.disableTLSVerify = true
@@ -143,8 +145,8 @@ func WithHTTPClient(client *http.Client) SeqOption {
 	})
 }
 
-// WithGlobalAttrs sets attributes that are included in every log event emitted
-// by this handler. LogValuer values are resolved eagerly at option time.
+// WithGlobalAttrs sets [slog.Attr] that are included in every log event emitted
+// by this handler. [slog.LogValuer] values are resolved eagerly at option time.
 func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		resolved := make([]slog.Attr, len(attrs))
@@ -162,10 +164,10 @@ func WithGlobalAttrs(attrs ...slog.Attr) SeqOption {
 	})
 }
 
-// WithSourceKey sets the key used for source location information when
-// AddSource is enabled in the handler options.
+// WithSourceKey sets the [slog.SourceKey] used for source location information
+// when AddSource is enabled in handler's given [slog.HandlerOptions] options.
 //
-// If unset, the default is slog.SourceKey("source").
+// If unset, the default is "source".
 func WithSourceKey(key string) SeqOption {
 	return seqOptionFunc(func(h *SeqHandler) *SeqHandler {
 		h.sourceKey = key
@@ -192,7 +194,7 @@ func WithWorkers(count int) SeqOption {
 
 // WithNonBlocking controls whether Handle blocks when the worker channel is
 // full. When true, events are dropped silently. When false, Handle blocks until
-// space is available or the handler is closed.
+// space becomes available or the handler is closed.
 //
 // If unset, the default is true (non-blocking) operation.
 func WithNonBlocking(nonBlocking bool) SeqOption {
@@ -218,7 +220,7 @@ func WithErrorHandlerFunc(fn func(error)) SeqOption {
 // WithEventEnricher adds a function that enriches each CLEF event with
 // additional context before dispatch. Called during Handle with the log
 // record's context and event pointer. Multiple enrichers run in the order
-// they were added.
+// they were added. Use this for custom integrations (such as tracing).
 //
 // If unset, the default is a no-op.
 func WithEventEnricher(fn func(context.Context, *CLEFEvent)) SeqOption {
@@ -231,7 +233,7 @@ func WithEventEnricher(fn func(context.Context, *CLEFEvent)) SeqOption {
 	})
 }
 
-// WithNoFlush disables flushing.
+// WithNoFlush disables flushing (workers exit immediately).
 //
 // Intended only for use in tests to inspect dispatched events.
 func WithNoFlush() SeqOption {

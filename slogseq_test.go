@@ -181,19 +181,6 @@ func Test_WithFlushInterval_SetsInterval_Success(t *testing.T) {
 	require.Equal(t, 10*time.Second, handler.flushInterval)
 }
 
-// Expectation: WithFlushInterval with zero should fall back to the default.
-func Test_WithFlushInterval_Zero_FallsBackToDefault_Success(t *testing.T) {
-	t.Parallel()
-
-	_, handler := NewLogger("http://fake",
-		WithFlushInterval(0),
-		WithNoFlush(),
-	)
-	defer handler.Close()
-
-	require.Equal(t, defaultFlushInterval, handler.flushInterval)
-}
-
 // Expectation: WithFlushInterval with negative value should fall back to the default.
 func Test_WithFlushInterval_Negative_FallsBackToDefault_Success(t *testing.T) {
 	t.Parallel()
