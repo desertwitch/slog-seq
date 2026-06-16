@@ -13,13 +13,12 @@ import (
 
 const (
 	defaultBatchSize       = 50
+	defaultBufferSize      = 1000
+	defaultRetryBufferSize = 1000
 	defaultFlushInterval   = 2 * time.Second
-	defaultPurgeUnsetAfter = 5 * time.Minute
 	defaultWorkerCount     = 1
 	defaultSendBlocking    = false
 	defaultDisableFlushing = false
-
-	maxWorkerEventBacklog = 1000
 )
 
 var _ slog.Handler = (*SeqHandler)(nil)
@@ -29,11 +28,12 @@ type shared struct {
 	seqURL           string
 	apiKey           string
 	batchSize        int
+	bufferSize       int
+	retryBufferSize  int
 	flushInterval    time.Duration
-	purgeUnsentAfter time.Duration
 	disableTLSVerify bool
 	workerCount      int
-	nonBlocking      bool
+	blockingMode     bool
 	noFlush          bool
 	eventEnrichers   []func(context.Context, *CLEFEvent)
 
@@ -57,7 +57,6 @@ type shared struct {
 type worker struct {
 	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent
-	purgeTicker *time.Ticker
 }
 
 // attrSet holds a set of attrs with the group path they belong under. The
@@ -102,12 +101,13 @@ func NewSeqHandler(seqURL string, opts ...SeqOption) *SeqHandler {
 			seqURL:  seqURL,
 			closeCh: make(chan struct{}),
 
-			batchSize:        defaultBatchSize,
-			flushInterval:    defaultFlushInterval,
-			purgeUnsentAfter: defaultPurgeUnsetAfter,
-			workerCount:      defaultWorkerCount,
-			nonBlocking:      !defaultSendBlocking,
-			noFlush:          defaultDisableFlushing,
+			bufferSize:      defaultBufferSize,
+			retryBufferSize: defaultRetryBufferSize,
+			batchSize:       defaultBatchSize,
+			flushInterval:   defaultFlushInterval,
+			workerCount:     defaultWorkerCount,
+			noFlush:         defaultDisableFlushing,
+			blockingMode:    defaultSendBlocking,
 		},
 
 		sourceKey: slog.SourceKey,
@@ -135,7 +135,7 @@ func (h *SeqHandler) start() {
 
 	h.workers = make([]worker, h.workerCount)
 	for i := range h.workerCount {
-		h.workers[i].eventsCh = make(chan CLEFEvent, maxWorkerEventBacklog)
+		h.workers[i].eventsCh = make(chan CLEFEvent, h.bufferSize)
 
 		h.workerWg.Add(1)
 		go h.runBackgroundFlusher(&h.workers[i])
@@ -232,21 +232,21 @@ func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	}
 
 	idx := h.next.Add(1) % uint32(len(h.workers)) //nolint:gosec
-	if h.nonBlocking {
-		// send to channel, drop if full
-		select {
-		case h.workers[idx].eventsCh <- event:
-			// success
-		default:
-			// channel full, drop event
-		}
-	} else {
+	if h.blockingMode {
 		// blocking send
 		select {
 		case h.workers[idx].eventsCh <- event:
 			// success
 		case <-h.closeCh:
 			// unblock on close, drop event
+		}
+	} else {
+		// send to channel, drop if full
+		select {
+		case h.workers[idx].eventsCh <- event:
+			// success
+		default:
+			// channel full, drop event
 		}
 	}
 }

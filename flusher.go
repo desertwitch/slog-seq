@@ -48,12 +48,12 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		return
 	}
 
-	ticker := time.NewTicker(h.flushInterval)
-	defer ticker.Stop()
-
-	purgeInterval := h.flushInterval * 60 //nolint:mnd
-	w.purgeTicker = time.NewTicker(purgeInterval)
-	defer w.purgeTicker.Stop()
+	var tickerChan <-chan time.Time
+	if h.flushInterval > 0 {
+		ticker := time.NewTicker(h.flushInterval)
+		defer ticker.Stop()
+		tickerChan = ticker.C
+	}
 
 	events := make([]CLEFEvent, 0, h.batchSize)
 
@@ -70,13 +70,8 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 				h.flushCurrentBatch(w, &events)
 			}
 
-		case <-ticker.C:
+		case <-tickerChan:
 			h.flushCurrentBatch(w, &events)
-
-		case <-w.purgeTicker.C:
-			// Purge events older than 5 minutes from retry buffer
-			cutoff := time.Now().Add(-h.purgeUnsentAfter)
-			h.purgeOldEvents(w, cutoff)
 		}
 	}
 }
@@ -94,6 +89,12 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 		}
 
 		*events = (*events)[:0]
+	}
+
+	if len(w.retryBuffer) > h.retryBufferSize {
+		dropped := len(w.retryBuffer) - h.retryBufferSize
+		w.retryBuffer = w.retryBuffer[dropped:]
+		h.errorHandlerFunc(fmt.Errorf("dropping %d oldest events; retry buffer exceeded limit", dropped))
 	}
 }
 
@@ -198,23 +199,6 @@ func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
 	}
 
 	return nil
-}
-
-func (h *SeqHandler) purgeOldEvents(w *worker, olderThan time.Time) {
-	newBuf := w.retryBuffer[:0]
-
-	for _, e := range w.retryBuffer {
-		if e.Timestamp.After(olderThan) {
-			newBuf = append(newBuf, e)
-		}
-	}
-
-	purgedEvents := len(w.retryBuffer) - len(newBuf)
-	if purgedEvents > 0 {
-		h.errorHandlerFunc(fmt.Errorf("purged %d events from retry buffer older than %s", purgedEvents, olderThan.Format(time.RFC3339)))
-	}
-
-	w.retryBuffer = newBuf
 }
 
 // dottedToNested converts a flat map with dotted keys ("a.b.c") into a
