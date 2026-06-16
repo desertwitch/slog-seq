@@ -2,8 +2,11 @@ package slogseq
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -140,6 +143,42 @@ func (h *SeqHandler) start() {
 		h.workerWg.Add(1)
 		go h.runBackgroundFlusher(&h.workers[i])
 	}
+}
+
+// Ping checks whether the Seq server is reachable and in service by calling
+// its /health endpoint. Uses the handler's configured HTTP client.
+//
+// Intended for startup checks before setting a constructed handler as default.
+func (h *SeqHandler) Ping() error {
+	u, err := url.Parse(h.seqURL)
+	if err != nil {
+		return fmt.Errorf("seq URL: %w", err)
+	}
+	u.Path = "/health"
+	u.RawQuery = ""
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil) //nolint:noctx
+	if err != nil {
+		return fmt.Errorf("health request: %w", err)
+	}
+	if h.apiKey != "" {
+		req.Header.Set("X-Seq-ApiKey", h.apiKey) //nolint:canonicalheader
+	}
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health check: status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // Enabled reports whether the handler is configured to log at the given level.

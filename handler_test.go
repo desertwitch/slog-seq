@@ -249,6 +249,193 @@ func Test_SeqHandler_Enabled_NilLevel_AllEnabled_Success(t *testing.T) {
 	require.True(t, handler.Enabled(context.Background(), slog.LevelError))
 }
 
+// Expectation: Ping should return nil when the Seq server responds with 200 OK.
+func Test_SeqHandler_Ping_ReturnsNil_Success(t *testing.T) {
+	t.Parallel()
+
+	client := GetHTTPClientMock(200, `{"status":"healthy"}`, func() {})
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+}
+
+// Expectation: Ping should return an error when the Seq server responds with 503.
+func Test_SeqHandler_Ping_Returns503_Error(t *testing.T) {
+	t.Parallel()
+
+	client := GetHTTPClientMock(503, `{"status":"unavailable"}`, func() {})
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "503")
+}
+
+// Expectation: Ping should return an error when the server is unreachable.
+func Test_SeqHandler_Ping_Unreachable_Error(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("dial tcp: connect: connection refused")
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "health check")
+}
+
+// Expectation: Ping should derive /health from any ingestion path.
+func Test_SeqHandler_Ping_DerivesHealthPath_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedPath string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedPath = req.URL.String()
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Equal(t, "http://fake/health", capturedPath)
+}
+
+// Expectation: Ping should send the API key when one is configured.
+func Test_SeqHandler_Ping_SendsAPIKey_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedKey string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedKey = req.Header.Get("X-Seq-ApiKey")
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithAPIKey("my-secret-key"),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Equal(t, "my-secret-key", capturedKey)
+}
+
+// Expectation: Ping should not send an API key header when none is configured.
+func Test_SeqHandler_Ping_NoAPIKey_OmitsHeader_Success(t *testing.T) {
+	t.Parallel()
+
+	var hasHeader bool
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				hasHeader = req.Header.Get("X-Seq-ApiKey") != ""
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.False(t, hasHeader)
+}
+
+// Expectation: Ping should return an error when the URL is unparseable.
+func Test_SeqHandler_Ping_InvalidURL_Error(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("://bad-url",
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "seq URL")
+}
+
+// Expectation: Ping should strip query parameters from the URL.
+func Test_SeqHandler_Ping_StripsQueryParams_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedRawQuery string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedRawQuery = req.URL.RawQuery
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef?token=abc",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Empty(t, capturedRawQuery)
+}
+
 // Expectation: SourceKey should return the configured source key.
 func Test_SeqHandler_SourceKey_ReturnsConfigured_Success(t *testing.T) {
 	t.Parallel()
