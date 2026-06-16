@@ -160,9 +160,9 @@ func (p *LoggingSpanProcessor) logOTelSpanAsCLEF(span trace.ReadOnlySpan) {
 	// Set level based on span status
 	status := span.Status()
 
-	event.Level = slogseq.CLEFLevelInformation.String()
+	event.Level = slogseq.CLEFLevelInformation
 	if status.Code == codes.Error {
-		event.Level = slogseq.CLEFLevelError.String()
+		event.Level = slogseq.CLEFLevelError
 		if status.Description != "" {
 			event.Message = status.Description
 		}
@@ -181,7 +181,7 @@ func (p *LoggingSpanProcessor) logOTelEventAsCLEF(span trace.ReadOnlySpan, e tra
 	event := &slogseq.CLEFEvent{
 		Timestamp:          e.Time,
 		Message:            e.Name,
-		Level:              slogseq.CLEFLevelInformation.String(),
+		Level:              slogseq.CLEFLevelInformation,
 		TraceID:            sc.TraceID().String(),
 		SpanID:             sc.SpanID().String(),
 		SpanStart:          span.StartTime(),
@@ -199,7 +199,7 @@ func (p *LoggingSpanProcessor) logOTelEventAsCLEF(span trace.ReadOnlySpan, e tra
 		v := attr.Value.AsInterface()
 		event.Properties[k] = v
 		if k == "exception.message" {
-			event.Level = slogseq.CLEFLevelError.String()
+			event.Level = slogseq.CLEFLevelError
 			event.Message = fmt.Sprint(v)
 		}
 		if k == "exception.stacktrace" {

@@ -266,7 +266,7 @@ func Test_LoggingSpanProcessor_OnEnd_DefaultLevel_Information_Success(t *testing
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation, events[0].Level)
 }
 
 // Expectation: OnEnd should set ParentSpanID when the span has a parent.
@@ -329,7 +329,7 @@ func Test_LoggingSpanProcessor_OnEnd_ErrorStatus_SetsErrorLevel_Success(t *testi
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, slogseq.CLEFLevelError.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelError, events[0].Level)
 	require.Equal(t, "something failed", events[0].Message)
 }
 
@@ -347,7 +347,7 @@ func Test_LoggingSpanProcessor_OnEnd_ErrorStatusNoDescription_KeepsSpanName_Succ
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, slogseq.CLEFLevelError.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelError, events[0].Level)
 	require.Equal(t, "errorNoDesc", events[0].Message)
 }
 
@@ -365,7 +365,7 @@ func Test_LoggingSpanProcessor_OnEnd_OKStatus_NoErrorLevel_Success(t *testing.T)
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation, events[0].Level)
 	require.Equal(t, "okSpan", events[0].Message)
 }
 
@@ -466,7 +466,7 @@ func Test_LoggingSpanProcessor_OnEnd_SpanEvent_DefaultLevel_Information_Success(
 
 	events := drainEvents(t, handler, 2)
 
-	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation, events[0].Level)
 }
 
 // Expectation: A span with Unset status (default) should have Information level.
@@ -483,7 +483,7 @@ func Test_LoggingSpanProcessor_OnEnd_UnsetStatus_InformationLevel_Success(t *tes
 
 	events := drainEvents(t, handler, 1)
 
-	require.Equal(t, slogseq.CLEFLevelInformation.String(), events[0].Level)
+	require.Equal(t, slogseq.CLEFLevelInformation, events[0].Level)
 	require.Equal(t, "unsetSpan", events[0].Message)
 }
 
@@ -528,7 +528,7 @@ func Test_LoggingSpanProcessor_OnEnd_WithException_SetsErrorLevel_Success(t *tes
 
 	eventEvt := events[0]
 	require.Equal(t, "error occurred", eventEvt.Message)
-	require.Equal(t, slogseq.CLEFLevelError.String(), eventEvt.Level)
+	require.Equal(t, slogseq.CLEFLevelError, eventEvt.Level)
 	require.Equal(t, int64(500), eventEvt.Properties["code"])
 }
 
@@ -696,7 +696,7 @@ func Test_LoggingSpanProcessor_OnEnd_WithStacktrace_SetsException_Success(t *tes
 
 	eventEvt := events[0]
 	require.Equal(t, "null pointer", eventEvt.Message)
-	require.Equal(t, slogseq.CLEFLevelError.String(), eventEvt.Level)
+	require.Equal(t, slogseq.CLEFLevelError, eventEvt.Level)
 	require.Equal(t, "at main.go:42\nat handler.go:15", eventEvt.Exception)
 	require.Equal(t, "NullPointerException", eventEvt.Properties["exception.type"])
 }
