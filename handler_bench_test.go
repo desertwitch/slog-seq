@@ -453,7 +453,7 @@ func BenchmarkHandleCLEFEvent(b *testing.B) {
 	event := CLEFEvent{
 		Timestamp: time.Now(),
 		Message:   "hello",
-		Level:     CLEFLevelInformation.String(),
+		Level:     CLEFLevelInformation,
 		Properties: map[string]any{
 			"user":   "bob",
 			"status": 200,

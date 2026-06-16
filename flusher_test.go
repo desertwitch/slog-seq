@@ -63,7 +63,7 @@ func Test_newHTTPClient_SkipVerify_DisablesTLSVerification_Success(t *testing.T)
 }
 
 // Expectation: The flusher should flush events when the batch size is reached.
-func Test_runBackgroundFlusher_FlushOnBatchSize_Success(t *testing.T) {
+func Test_runFlusher_FlushOnBatchSize_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -84,7 +84,7 @@ func Test_runBackgroundFlusher_FlushOnBatchSize_Success(t *testing.T) {
 	w := &handler.workers[0]
 	handler.workerWg.Add(1)
 
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	w.eventsCh <- CLEFEvent{Message: "event1", Timestamp: time.Now()}
 	w.eventsCh <- CLEFEvent{Message: "event2", Timestamp: time.Now()}
@@ -96,7 +96,7 @@ func Test_runBackgroundFlusher_FlushOnBatchSize_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should flush events after the flush interval even if batch size is not reached.
-func Test_runBackgroundFlusher_FlushOnInterval_Success(t *testing.T) {
+func Test_runFlusher_FlushOnInterval_Success(t *testing.T) {
 	t.Parallel()
 
 	flushInterval := 50 * time.Millisecond
@@ -118,7 +118,7 @@ func Test_runBackgroundFlusher_FlushOnInterval_Success(t *testing.T) {
 
 	handler.workerWg.Add(1)
 
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	w.eventsCh <- CLEFEvent{Message: "event1", Timestamp: time.Now()}
 
@@ -135,7 +135,7 @@ func Test_runBackgroundFlusher_FlushOnInterval_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should retry failed batches and succeed on subsequent attempts.
-func Test_runBackgroundFlusher_RetryOnFailure_Success(t *testing.T) {
+func Test_runFlusher_RetryOnFailure_Success(t *testing.T) {
 	t.Parallel()
 
 	var attempts int
@@ -174,7 +174,7 @@ func Test_runBackgroundFlusher_RetryOnFailure_Success(t *testing.T) {
 
 	handler.workerWg.Add(1)
 
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	w.eventsCh <- CLEFEvent{Message: "fail1", Timestamp: time.Now()}
 	w.eventsCh <- CLEFEvent{Message: "fail2", Timestamp: time.Now()}
@@ -189,7 +189,7 @@ func Test_runBackgroundFlusher_RetryOnFailure_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should flush the retry buffer when the channel is closed.
-func Test_runBackgroundFlusher_RetryBufferFlushedOnClose_Success(t *testing.T) {
+func Test_runFlusher_RetryBufferFlushedOnClose_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -229,7 +229,7 @@ func Test_runBackgroundFlusher_RetryBufferFlushedOnClose_Success(t *testing.T) {
 	}
 
 	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	close(w.eventsCh)
 	handler.workerWg.Wait()
@@ -242,7 +242,7 @@ func Test_runBackgroundFlusher_RetryBufferFlushedOnClose_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should exit immediately and not process events when noFlush is set.
-func Test_runBackgroundFlusher_NoFlushModeExits_Success(t *testing.T) {
+func Test_runFlusher_NoFlushModeExits_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -257,7 +257,7 @@ func Test_runBackgroundFlusher_NoFlushModeExits_Success(t *testing.T) {
 	}
 
 	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	w.eventsCh <- CLEFEvent{Message: "test", Timestamp: time.Now()}
 
@@ -268,7 +268,7 @@ func Test_runBackgroundFlusher_NoFlushModeExits_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should handle rapid open/close without blocking.
-func Test_runBackgroundFlusher_ImmediateClose_Success(t *testing.T) {
+func Test_runFlusher_ImmediateClose_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -287,7 +287,7 @@ func Test_runBackgroundFlusher_ImmediateClose_Success(t *testing.T) {
 
 	handler.workerWg.Add(1)
 	close(w.eventsCh)
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	done := make(chan struct{})
 	go func() {
@@ -304,7 +304,7 @@ func Test_runBackgroundFlusher_ImmediateClose_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should drain all remaining events from channel on close.
-func Test_runBackgroundFlusher_DrainsOnClose_Success(t *testing.T) {
+func Test_runFlusher_DrainsOnClose_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -346,7 +346,7 @@ func Test_runBackgroundFlusher_DrainsOnClose_Success(t *testing.T) {
 	close(w.eventsCh)
 
 	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 	handler.workerWg.Wait()
 
 	mu.Lock()
@@ -356,7 +356,7 @@ func Test_runBackgroundFlusher_DrainsOnClose_Success(t *testing.T) {
 }
 
 // Expectation: The flusher should accumulate events until batch size before sending.
-func Test_runBackgroundFlusher_BatchAccumulation_Success(t *testing.T) {
+func Test_runFlusher_BatchAccumulation_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -392,7 +392,7 @@ func Test_runBackgroundFlusher_BatchAccumulation_Success(t *testing.T) {
 	}
 
 	handler.workerWg.Add(1)
-	go handler.runBackgroundFlusher(w)
+	go handler.runFlusher(w)
 
 	// Send exactly 5 events to trigger one batch flush.
 	for range 5 {
@@ -412,63 +412,8 @@ func Test_runBackgroundFlusher_BatchAccumulation_Success(t *testing.T) {
 	require.Equal(t, 5, batchSizes[0], "first batch should contain exactly batchSize events")
 }
 
-// Expectation: sendWithRetry with empty input should return nil.
-func Test_sendWithRetry_EmptyInput_ReturnsNil_Success(t *testing.T) {
-	t.Parallel()
-
-	handler := &SeqHandler{
-		shared: &shared{},
-	}
-
-	result := handler.sendWithRetry(nil)
-	require.Nil(t, result)
-
-	result = handler.sendWithRetry([]CLEFEvent{})
-	require.Nil(t, result)
-}
-
-// Expectation: sendWithRetry should return nil on successful send.
-func Test_sendWithRetry_SuccessfulSend_ReturnsNil_Success(t *testing.T) {
-	t.Parallel()
-
-	handler := &SeqHandler{
-		shared: &shared{
-			client:           GetHTTPClientMock(200, "ok", func() {}),
-			seqURL:           "http://example.com",
-			errorHandlerFunc: func(_ error) {},
-		},
-	}
-
-	events := []CLEFEvent{
-		{Message: "e1", Timestamp: time.Now()},
-	}
-
-	result := handler.sendWithRetry(events)
-	require.Nil(t, result)
-}
-
-// Expectation: sendWithRetry should return events on failure.
-func Test_sendWithRetry_FailedSend_ReturnsEvents_Success(t *testing.T) {
-	t.Parallel()
-
-	handler := &SeqHandler{
-		shared: &shared{
-			client:           GetHTTPClientMock(500, "error", func() {}),
-			seqURL:           "http://example.com",
-			errorHandlerFunc: func(_ error) {},
-		},
-	}
-
-	events := []CLEFEvent{
-		{Message: "e1", Timestamp: time.Now()},
-	}
-
-	result := handler.sendWithRetry(events)
-	require.Len(t, result, 1)
-}
-
-// Expectation: flushCurrentBatch should send events and clear the slice.
-func Test_flushCurrentBatch_SendsAndClearsEvents_Success(t *testing.T) {
+// Expectation: flushBatch should send events and clear the slice.
+func Test_flushBatch_SendsAndClearsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	var callCount int
@@ -486,15 +431,15 @@ func Test_flushCurrentBatch_SendsAndClearsEvents_Success(t *testing.T) {
 		{Message: "e2", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Empty(t, events)
 	require.Equal(t, 1, callCount)
 	require.Empty(t, w.retryBuffer)
 }
 
-// Expectation: flushCurrentBatch should flush retry buffer before current events.
-func Test_flushCurrentBatch_FlushesRetryBufferFirst_Success(t *testing.T) {
+// Expectation: flushBatch should flush retry buffer before current events.
+func Test_flushBatch_FlushesRetryBufferFirst_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -535,7 +480,7 @@ func Test_flushCurrentBatch_FlushesRetryBufferFirst_Success(t *testing.T) {
 		{Message: "current event", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -545,8 +490,8 @@ func Test_flushCurrentBatch_FlushesRetryBufferFirst_Success(t *testing.T) {
 	require.Empty(t, w.retryBuffer)
 }
 
-// Expectation: flushCurrentBatch with no events and no retry buffer should not make HTTP calls.
-func Test_flushCurrentBatch_NothingToFlush_NoHTTPCalls_Success(t *testing.T) {
+// Expectation: flushBatch with no events and no retry buffer should not make HTTP calls.
+func Test_flushBatch_NothingToFlush_NoHTTPCalls_Success(t *testing.T) {
 	t.Parallel()
 
 	called := false
@@ -561,13 +506,13 @@ func Test_flushCurrentBatch_NothingToFlush_NoHTTPCalls_Success(t *testing.T) {
 	w := &worker{}
 	events := []CLEFEvent{}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.False(t, called)
 }
 
-// Expectation: flushCurrentBatch should accumulate failed events into retry buffer.
-func Test_flushCurrentBatch_FailedEvents_AccumulateInRetryBuffer_Success(t *testing.T) {
+// Expectation: flushBatch should accumulate failed events into retry buffer.
+func Test_flushBatch_FailedEvents_AccumulateInRetryBuffer_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -585,14 +530,14 @@ func Test_flushCurrentBatch_FailedEvents_AccumulateInRetryBuffer_Success(t *test
 		{Message: "e2", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Empty(t, events, "events slice should be cleared even on failure")
 	require.Len(t, w.retryBuffer, 2, "failed events should be in retry buffer")
 }
 
-// Expectation: flushCurrentBatch with only retry buffer events should flush them.
-func Test_flushCurrentBatch_OnlyRetryBuffer_Flushed_Success(t *testing.T) {
+// Expectation: flushBatch with only retry buffer events should flush them.
+func Test_flushBatch_OnlyRetryBuffer_Flushed_Success(t *testing.T) {
 	t.Parallel()
 
 	var callCount int
@@ -611,14 +556,14 @@ func Test_flushCurrentBatch_OnlyRetryBuffer_Flushed_Success(t *testing.T) {
 	}
 	events := []CLEFEvent{}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Equal(t, 1, callCount)
 	require.Empty(t, w.retryBuffer)
 }
 
-// Expectation: flushCurrentBatch should append failed current events to existing retry buffer failures.
-func Test_flushCurrentBatch_RetryBufferFailAndCurrentFail_BothAccumulate_Success(t *testing.T) {
+// Expectation: flushBatch should append failed current events to existing retry buffer failures.
+func Test_flushBatch_RetryBufferFailAndCurrentFail_BothAccumulate_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -639,14 +584,14 @@ func Test_flushCurrentBatch_RetryBufferFailAndCurrentFail_BothAccumulate_Success
 		{Message: "new-event", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Empty(t, events)
 	require.Len(t, w.retryBuffer, 2, "both failed retry and failed current should be in buffer")
 }
 
-// Expectation: flushCurrentBatch should cap the retry buffer at retryBufferSize.
-func Test_flushCurrentBatch_RetryBufferCapped_Success(t *testing.T) {
+// Expectation: flushBatch should cap the retry buffer at retryBufferSize.
+func Test_flushBatch_RetryBufferCapped_Success(t *testing.T) {
 	t.Parallel()
 
 	var errMsg string
@@ -668,7 +613,7 @@ func Test_flushCurrentBatch_RetryBufferCapped_Success(t *testing.T) {
 		{Message: "e5", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Len(t, w.retryBuffer, 3, "retry buffer should be capped at retryBufferSize")
 	require.Equal(t, "e3", w.retryBuffer[0].Message, "oldest events should be dropped")
@@ -677,8 +622,8 @@ func Test_flushCurrentBatch_RetryBufferCapped_Success(t *testing.T) {
 	require.Contains(t, errMsg, "dropping 2 oldest events")
 }
 
-// Expectation: flushCurrentBatch should not drop events when retry buffer is within limit.
-func Test_flushCurrentBatch_RetryBufferWithinLimit_NoDrop_Success(t *testing.T) {
+// Expectation: flushBatch should not drop events when retry buffer is within limit.
+func Test_flushBatch_RetryBufferWithinLimit_NoDrop_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -696,7 +641,7 @@ func Test_flushCurrentBatch_RetryBufferWithinLimit_NoDrop_Success(t *testing.T) 
 		{Message: "e2", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Len(t, w.retryBuffer, 2)
 
@@ -704,8 +649,8 @@ func Test_flushCurrentBatch_RetryBufferWithinLimit_NoDrop_Success(t *testing.T) 
 	require.Equal(t, "e2", w.retryBuffer[1].Message)
 }
 
-// Expectation: flushCurrentBatch should cap combined retry buffer and new failures.
-func Test_flushCurrentBatch_RetryBufferCapsExistingPlusNew_Success(t *testing.T) {
+// Expectation: flushBatch should cap combined retry buffer and new failures.
+func Test_flushBatch_RetryBufferCapsExistingPlusNew_Success(t *testing.T) {
 	t.Parallel()
 
 	handler := &SeqHandler{
@@ -728,7 +673,7 @@ func Test_flushCurrentBatch_RetryBufferCapsExistingPlusNew_Success(t *testing.T)
 		{Message: "new2", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Len(t, w.retryBuffer, 3)
 	require.Equal(t, "old2", w.retryBuffer[0].Message, "oldest should be dropped first")
@@ -736,8 +681,8 @@ func Test_flushCurrentBatch_RetryBufferCapsExistingPlusNew_Success(t *testing.T)
 	require.Equal(t, "new2", w.retryBuffer[2].Message)
 }
 
-// Expectation: flushCurrentBatch should not trigger cap logic when retry buffer is exactly at limit.
-func Test_flushCurrentBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.T) {
+// Expectation: flushBatch should not trigger cap logic when retry buffer is exactly at limit.
+func Test_flushBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.T) {
 	t.Parallel()
 
 	var dropCalled bool
@@ -760,14 +705,14 @@ func Test_flushCurrentBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.
 		{Message: "e2", Timestamp: time.Now()},
 	}
 
-	handler.flushCurrentBatch(w, &events)
+	handler.flushBatch(w, &events)
 
 	require.Len(t, w.retryBuffer, 2)
 	require.False(t, dropCalled, "should not drop when exactly at limit")
 }
 
-// Expectation: attemptSendBatch with empty input should return nil without making HTTP calls.
-func Test_attemptSendBatch_EmptyInput_ReturnsNil_Success(t *testing.T) {
+// Expectation: sendEvents with empty input should return nil without making HTTP calls.
+func Test_sendEvents_EmptyInput_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
 
 	called := false
@@ -779,17 +724,17 @@ func Test_attemptSendBatch_EmptyInput_ReturnsNil_Success(t *testing.T) {
 		},
 	}
 
-	result := handler.attemptSendBatch(nil)
+	result := handler.sendEvents(nil)
 	require.Nil(t, result)
 	require.False(t, called, "HTTP client should not be called for empty input")
 
-	result = handler.attemptSendBatch([]CLEFEvent{})
+	result = handler.sendEvents([]CLEFEvent{})
 	require.Nil(t, result)
 	require.False(t, called)
 }
 
-// Expectation: attemptSendBatch should set Content-Type and API key headers.
-func Test_attemptSendBatch_SetsHeaders_Success(t *testing.T) {
+// Expectation: sendEvents should set Content-Type and API key headers.
+func Test_sendEvents_SetsHeaders_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedReq *http.Request
@@ -818,15 +763,15 @@ func Test_attemptSendBatch_SetsHeaders_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.attemptSendBatch(events)
+	handler.sendEvents(events)
 
 	require.NotNil(t, capturedReq)
 	require.Equal(t, "application/vnd.serilog.clef", capturedReq.Header.Get("Content-Type"))
 	require.Equal(t, "my-api-key", capturedReq.Header.Get("X-Seq-ApiKey"))
 }
 
-// Expectation: attemptSendBatch should omit API key header when apiKey is empty.
-func Test_attemptSendBatch_EmptyAPIKey_NoHeader_Success(t *testing.T) {
+// Expectation: sendEvents should omit API key header when apiKey is empty.
+func Test_sendEvents_EmptyAPIKey_NoHeader_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedReq *http.Request
@@ -855,14 +800,14 @@ func Test_attemptSendBatch_EmptyAPIKey_NoHeader_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.attemptSendBatch(events)
+	handler.sendEvents(events)
 
 	require.NotNil(t, capturedReq)
 	require.Empty(t, capturedReq.Header.Get("X-Seq-ApiKey"))
 }
 
-// Expectation: attemptSendBatch should send valid CLEF JSON lines in the request body.
-func Test_attemptSendBatch_SendsValidCLEFBody_Success(t *testing.T) {
+// Expectation: sendEvents should send valid CLEF JSON lines in the request body.
+func Test_sendEvents_SendsValidCLEFBody_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedBody string
@@ -893,7 +838,7 @@ func Test_attemptSendBatch_SendsValidCLEFBody_Success(t *testing.T) {
 		{Message: "second", Level: "Warning", Timestamp: now},
 	}
 
-	handler.attemptSendBatch(events)
+	handler.sendEvents(events)
 
 	lines := strings.Split(strings.TrimSpace(capturedBody), "\n")
 	require.Len(t, lines, 2)
@@ -909,8 +854,8 @@ func Test_attemptSendBatch_SendsValidCLEFBody_Success(t *testing.T) {
 	}
 }
 
-// Expectation: attemptSendBatch should return events and call error handler on HTTP client error.
-func Test_attemptSendBatch_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler on HTTP client error.
+func Test_sendEvents_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedErr error
@@ -933,22 +878,21 @@ func Test_attemptSendBatch_HTTPClientError_ReturnsEvents_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	result := handler.attemptSendBatch(events)
+	result := handler.sendEvents(events)
 
 	require.Len(t, result, 1)
 	require.Error(t, capturedErr)
 	require.Contains(t, capturedErr.Error(), "connection refused")
 }
 
-// Expectation: attemptSendBatch should return events and call error handler on non-2xx status.
-func Test_attemptSendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler on non-2xx status.
+func Test_sendEvents_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name   string
 		status int
 	}{
-		{name: "400 bad request", status: 400},
 		{name: "401 unauthorized", status: 401},
 		{name: "403 forbidden", status: 403},
 		{name: "404 not found", status: 404},
@@ -973,7 +917,7 @@ func Test_attemptSendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 				{Message: "e1", Timestamp: time.Now()},
 			}
 
-			result := handler.attemptSendBatch(events)
+			result := handler.sendEvents(events)
 
 			require.Len(t, result, 1, "events should be returned for status %d", tt.status)
 			require.True(t, errCalled, "error handler should be called for status %d", tt.status)
@@ -981,8 +925,8 @@ func Test_attemptSendBatch_Non2xxStatus_ReturnsEvents_Success(t *testing.T) {
 	}
 }
 
-// Expectation: attemptSendBatch should accept all 2xx status codes.
-func Test_attemptSendBatch_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
+// Expectation: sendEvents should accept all 2xx status codes.
+func Test_sendEvents_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
 
 	for status := 200; status <= 299; status++ {
@@ -1001,15 +945,15 @@ func Test_attemptSendBatch_All2xxStatuses_ReturnsNil_Success(t *testing.T) {
 				{Message: "e1", Timestamp: time.Now()},
 			}
 
-			result := handler.attemptSendBatch(events)
+			result := handler.sendEvents(events)
 
 			require.Nil(t, result)
 		})
 	}
 }
 
-// Expectation: attemptSendBatch should POST to the configured seqURL.
-func Test_attemptSendBatch_PostsToConfiguredURL_Success(t *testing.T) {
+// Expectation: sendEvents should POST to the configured seqURL.
+func Test_sendEvents_PostsToConfiguredURL_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedURL string
@@ -1039,14 +983,14 @@ func Test_attemptSendBatch_PostsToConfiguredURL_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.attemptSendBatch(events)
+	handler.sendEvents(events)
 
 	require.Equal(t, "http://my-seq-server:5341/api/events/raw", capturedURL)
 	require.Equal(t, "POST", capturedMethod)
 }
 
-// Expectation: attemptSendBatch should use POST method.
-func Test_attemptSendBatch_UsesPostMethod_Success(t *testing.T) {
+// Expectation: sendEvents should use POST method.
+func Test_sendEvents_UsesPostMethod_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedMethod string
@@ -1074,13 +1018,13 @@ func Test_attemptSendBatch_UsesPostMethod_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	handler.attemptSendBatch(events)
+	handler.sendEvents(events)
 
 	require.Equal(t, http.MethodPost, capturedMethod)
 }
 
 // Expectation: The function should split oversized batches and send them in smaller chunks.
-func Test_attemptSendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
+func Test_sendEvents_SplitsOnRequestTooLarge_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1128,7 +1072,7 @@ func Test_attemptSendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
 		{Message: "e6", Timestamp: time.Now()},
 	}
 
-	leftover := handler.attemptSendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1146,7 +1090,7 @@ func Test_attemptSendBatch_SplitsOnRequestTooLarge_Success(t *testing.T) {
 }
 
 // Expectation: The function should drop a single event that exceeds the server size limit.
-func Test_attemptSendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
+func Test_sendEvents_DropsOversizedSingleEvent_Success(t *testing.T) {
 	t.Parallel()
 
 	var errorCalled bool
@@ -1174,14 +1118,115 @@ func Test_attemptSendBatch_DropsOversizedSingleEvent_Success(t *testing.T) {
 		{Message: "huge event", Timestamp: time.Now()},
 	}
 
-	leftover := handler.attemptSendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	require.Empty(t, leftover, "expected single oversized event to be dropped")
 	require.True(t, errorCalled, "expected error handler to be called when dropping oversized event")
 }
 
+// Expectation: The function should split oversized batches and send them in smaller chunks.
+func Test_sendEvents_SplitsOnBadRequest_Success(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var sentBatches []int
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						lines := strings.Count(strings.TrimSpace(string(body)), "\n") + 1
+
+						mu.Lock()
+						defer mu.Unlock()
+
+						// Reject batches larger than 2 events
+						if lines > 2 {
+							return &http.Response{
+								StatusCode: http.StatusBadRequest,
+								Body:       io.NopCloser(bytes.NewReader(nil)),
+							}, nil
+						}
+
+						sentBatches = append(sentBatches, lines)
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(err error) {},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "e1", Timestamp: time.Now()},
+		{Message: "e2", Timestamp: time.Now()},
+		{Message: "e3", Timestamp: time.Now()},
+		{Message: "e4", Timestamp: time.Now()},
+		{Message: "e5", Timestamp: time.Now()},
+		{Message: "e6", Timestamp: time.Now()},
+	}
+
+	leftover := handler.sendEvents(events)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	require.Empty(t, leftover, "expected no leftover events")
+
+	// All events should have been sent in batches of 1 or 2
+	total := 0
+	for _, n := range sentBatches {
+		require.LessOrEqual(t, n, 2, "batch should have been split to at most 2")
+		total += n
+	}
+
+	require.Equal(t, len(events), total, "expected all events to be sent")
+}
+
+// Expectation: The function should drop a single event that is malformed.
+func Test_sendEvents_DropsBadRequestSingleEvent_Success(t *testing.T) {
+	t.Parallel()
+
+	var errorCalled bool
+
+	handler := &SeqHandler{
+		shared: &shared{
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						return &http.Response{
+							StatusCode: http.StatusBadRequest,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
+			seqURL: "http://example.com",
+			errorHandlerFunc: func(err error) {
+				errorCalled = true
+			},
+		},
+	}
+
+	events := []CLEFEvent{
+		{Message: "malformed event", Timestamp: time.Now()},
+	}
+
+	leftover := handler.sendEvents(events)
+
+	require.Empty(t, leftover, "expected single malformed event to be dropped")
+	require.True(t, errorCalled, "expected error handler to be called when dropping malformed event")
+}
+
 // Expectation: The function should return leftover events from the failed half of a split batch.
-func Test_attemptSendBatch_PartialFail_ReturnsLeftover_Success(t *testing.T) {
+func Test_sendEvents_PartialFail_ReturnsLeftover_Success(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1234,15 +1279,15 @@ func Test_attemptSendBatch_PartialFail_ReturnsLeftover_Success(t *testing.T) {
 		{Message: "e4", Timestamp: time.Now()},
 	}
 
-	leftover := handler.attemptSendBatch(events)
+	leftover := handler.sendEvents(events)
 
 	require.Len(t, leftover, 2, "expected 2 leftover events from failed right half")
 	require.Equal(t, "e3", leftover[0].Message)
 	require.Equal(t, "e4", leftover[1].Message)
 }
 
-// Expectation: attemptSendBatch should return events and call error handler when request creation fails.
-func Test_attemptSendBatch_InvalidURL_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should return events and call error handler when request creation fails.
+func Test_sendEvents_InvalidURL_ReturnsEvents_Success(t *testing.T) {
 	t.Parallel()
 
 	var capturedErr error
@@ -1258,37 +1303,84 @@ func Test_attemptSendBatch_InvalidURL_ReturnsEvents_Success(t *testing.T) {
 		{Message: "e1", Timestamp: time.Now()},
 	}
 
-	result := handler.attemptSendBatch(events)
+	result := handler.sendEvents(events)
 
 	require.Len(t, result, 1)
 	require.Error(t, capturedErr)
 }
 
-// Expectation: attemptSendBatch should return events when JSON encoding fails.
-func Test_attemptSendBatch_JSONEncodeFailure_ReturnsEvents_Success(t *testing.T) {
+// Expectation: sendEvents should drop unencodable events and send the rest.
+func Test_sendEvents_DropsUnencodableEvent_SendsRest_Success(t *testing.T) {
 	t.Parallel()
 
-	called := false
+	var capturedBody string
+	var errCount int
+
 	handler := &SeqHandler{
 		shared: &shared{
-			client:           GetHTTPClientMock(200, "ok", func() { called = true }),
+			client: &http.Client{
+				Transport: &mockTransport{
+					RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+						body, _ := io.ReadAll(req.Body)
+						capturedBody = string(body)
+
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(bytes.NewReader(nil)),
+						}, nil
+					},
+				},
+			},
 			seqURL:           "http://example.com",
-			errorHandlerFunc: func(_ error) {},
+			errorHandlerFunc: func(_ error) { errCount++ },
 		},
 	}
 
 	events := []CLEFEvent{
-		{
-			Message:    "e1",
-			Timestamp:  time.Now(),
-			Properties: map[string]any{"bad": make(chan int)},
+		{Message: "good1", Timestamp: time.Now()},
+		{Message: "bad", Timestamp: time.Now(), Properties: map[string]any{"poison": make(chan int)}},
+		{Message: "good2", Timestamp: time.Now()},
+	}
+
+	result := handler.sendEvents(events)
+
+	require.Nil(t, result, "good events should have been sent successfully")
+	require.Equal(t, 1, errCount, "error handler should be called once for the bad event")
+
+	lines := strings.Split(strings.TrimSpace(capturedBody), "\n")
+	require.Len(t, lines, 2, "only the two good events should be in the request")
+
+	var first, second map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
+	require.NoError(t, json.Unmarshal([]byte(lines[1]), &second))
+	require.Equal(t, "good1", first["@m"])
+	require.Equal(t, "good2", second["@m"])
+}
+
+// Expectation: sendEvents should return nil when all events are unencodable.
+func Test_sendEvents_AllUnencodable_ReturnsNil_Success(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	errCount := 0
+	handler := &SeqHandler{
+		shared: &shared{
+			client:           GetHTTPClientMock(200, "ok", func() { called = true }),
+			seqURL:           "http://example.com",
+			errorHandlerFunc: func(_ error) { errCount++ },
 		},
 	}
 
-	result := handler.attemptSendBatch(events)
+	events := []CLEFEvent{
+		{Message: "bad1", Timestamp: time.Now(), Properties: map[string]any{"a": make(chan int)}},
+		{Message: "bad2", Timestamp: time.Now(), Properties: map[string]any{"b": make(chan int)}},
+	}
 
-	require.Len(t, result, 1)
-	require.False(t, called, "HTTP client should not be called when encoding fails")
+	result := handler.sendEvents(events)
+
+	require.Nil(t, result, "all events dropped, nothing to retry")
+	require.False(t, called, "HTTP client should not be called when no events survive encoding")
+	require.Equal(t, 2, errCount, "error callback should have been called")
 }
 
 // Expectation: encodeEvent should set all required CLEF keys.

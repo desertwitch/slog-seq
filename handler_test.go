@@ -249,29 +249,191 @@ func Test_SeqHandler_Enabled_NilLevel_AllEnabled_Success(t *testing.T) {
 	require.True(t, handler.Enabled(context.Background(), slog.LevelError))
 }
 
-// Expectation: SourceKey should return the configured source key.
-func Test_SeqHandler_SourceKey_ReturnsConfigured_Success(t *testing.T) {
+// Expectation: Ping should return nil when the Seq server responds with 200 OK.
+func Test_SeqHandler_Ping_ReturnsNil_Success(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake",
-		WithSourceKey("mysource"),
+	client := GetHTTPClientMock(200, `{"status":"healthy"}`, func() {})
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
 		WithNoFlush(),
 	)
 	defer handler.Close()
 
-	require.Equal(t, "mysource", handler.SourceKey())
+	err := handler.Ping()
+	require.NoError(t, err)
 }
 
-// Expectation: SourceKey should return the default slog.SourceKey when not customized.
-func Test_SeqHandler_SourceKey_ReturnsDefault_Success(t *testing.T) {
+// Expectation: Ping should return an error when the Seq server responds with 503.
+func Test_SeqHandler_Ping_Returns503_Error(t *testing.T) {
 	t.Parallel()
 
-	_, handler := NewLogger("http://fake",
+	client := GetHTTPClientMock(503, `{"status":"unavailable"}`, func() {})
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
 		WithNoFlush(),
 	)
 	defer handler.Close()
 
-	require.Equal(t, slog.SourceKey, handler.SourceKey())
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "503")
+}
+
+// Expectation: Ping should return an error when the server is unreachable.
+func Test_SeqHandler_Ping_Unreachable_Error(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("dial tcp: connect: connection refused")
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "health check")
+}
+
+// Expectation: Ping should derive /health from any ingestion path.
+func Test_SeqHandler_Ping_DerivesHealthPath_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedPath string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedPath = req.URL.String()
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Equal(t, "http://fake/health", capturedPath)
+}
+
+// Expectation: Ping should send the API key when one is configured.
+func Test_SeqHandler_Ping_SendsAPIKey_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedKey string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedKey = req.Header.Get("X-Seq-ApiKey")
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithAPIKey("my-secret-key"),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Equal(t, "my-secret-key", capturedKey)
+}
+
+// Expectation: Ping should not send an API key header when none is configured.
+func Test_SeqHandler_Ping_NoAPIKey_OmitsHeader_Success(t *testing.T) {
+	t.Parallel()
+
+	var hasHeader bool
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				hasHeader = req.Header.Get("X-Seq-ApiKey") != ""
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.False(t, hasHeader)
+}
+
+// Expectation: Ping should return an error when the URL is unparseable.
+func Test_SeqHandler_Ping_InvalidURL_Error(t *testing.T) {
+	t.Parallel()
+
+	handler := NewSeqHandler("://bad-url",
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "seq URL")
+}
+
+// Expectation: Ping should strip query parameters from the URL.
+func Test_SeqHandler_Ping_StripsQueryParams_Success(t *testing.T) {
+	t.Parallel()
+
+	var capturedRawQuery string
+	client := &http.Client{
+		Transport: &mockTransport{
+			RoundTripFunc: func(req *http.Request) (*http.Response, error) {
+				capturedRawQuery = req.URL.RawQuery
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewReader(nil)),
+				}, nil
+			},
+		},
+	}
+
+	handler := NewSeqHandler("http://fake/ingest/clef?token=abc",
+		WithHTTPClient(client),
+		WithNoFlush(),
+	)
+	defer handler.Close()
+
+	err := handler.Ping()
+	require.NoError(t, err)
+	require.Empty(t, capturedRawQuery)
 }
 
 // Expectation: Handle should return nil error on success.
@@ -1596,34 +1758,34 @@ func Test_resolveAttr_ErrorConversionAfterReplace_Success(t *testing.T) {
 }
 
 // Expectation: An attr with an empty key and non-group value should be silently dropped.
-func Test_addResolvedAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
+func Test_resolveAndAddAttr_EmptyKeyNonGroup_Dropped_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.String("", "invisible"))
+	handler.resolveAndAddAttr(dst, nil, slog.String("", "invisible"))
 
 	require.Empty(t, dst)
 }
 
 // Expectation: An anonymous group (empty key, group kind) should inline its children.
-func Test_addResolvedAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
+func Test_resolveAndAddAttr_AnonymousGroup_InlinesChildren_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("", slog.String("x", "1"), slog.Int("y", 2)))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("", slog.String("x", "1"), slog.Int("y", 2)))
 
 	require.Equal(t, "1", dst["x"])
 	require.Equal(t, int64(2), dst["y"])
 }
 
 // Expectation: A deeply nested anonymous group should still inline all children.
-func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
@@ -1632,36 +1794,36 @@ func Test_addResolvedAttr_NestedAnonymousGroups_InlinesAll_Success(t *testing.T)
 	dst := make(map[string]any)
 	inner := slog.Group("", slog.String("deep", "value"))
 	outer := slog.Group("", inner, slog.Int("shallow", 1))
-	handler.addResolvedAttr(dst, nil, outer)
+	handler.resolveAndAddAttr(dst, nil, outer)
 
 	require.Equal(t, "value", dst["deep"])
 	require.Equal(t, int64(1), dst["shallow"])
 }
 
 // Expectation: Named groups should create nested maps with their children inside.
-func Test_addResolvedAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroup_CreatesNestedMap_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
 
 	g := dst["g"].(map[string]any)
 	require.Equal(t, "v", g["k"])
 }
 
 // Expectation: Two named groups with the same key should merge their children.
-func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroupMerge_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("a", "1")))
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("b", "2")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("a", "1")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("b", "2")))
 
 	g := dst["g"].(map[string]any)
 	require.Equal(t, "1", g["a"])
@@ -1669,14 +1831,14 @@ func Test_addResolvedAttr_NamedGroupMerge_Success(t *testing.T) {
 }
 
 // Expectation: A named group with a key that collides with a non-map value should overwrite it.
-func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
+func Test_resolveAndAddAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := map[string]any{"g": "scalar"}
-	handler.addResolvedAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g", slog.String("k", "v")))
 
 	g, ok := dst["g"].(map[string]any)
 	require.True(t, ok, "should have replaced scalar with map")
@@ -1684,7 +1846,7 @@ func Test_addResolvedAttr_NamedGroupOverwritesScalar_Success(t *testing.T) {
 }
 
 // Expectation: Deeply nested named groups should produce deeply nested maps.
-func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DeepNamedGroups_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
@@ -1694,7 +1856,7 @@ func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 	deep := slog.Group("l3", slog.String("leaf", "val"))
 	mid := slog.Group("l2", deep)
 	top := slog.Group("l1", mid)
-	handler.addResolvedAttr(dst, nil, top)
+	handler.resolveAndAddAttr(dst, nil, top)
 
 	l1 := dst["l1"].(map[string]any)
 	l2 := l1["l2"].(map[string]any)
@@ -1703,14 +1865,14 @@ func Test_addResolvedAttr_DeepNamedGroups_Success(t *testing.T) {
 }
 
 // Expectation: A named group containing dotted key names should preserve dots literally.
-func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.String("a.b.c", "dotted"))
+	handler.resolveAndAddAttr(dst, nil, slog.String("a.b.c", "dotted"))
 
 	require.Equal(t, "dotted", dst["a.b.c"])
 	_, hasA := dst["a"]
@@ -1718,14 +1880,14 @@ func Test_addResolvedAttr_DottedAttrKey_PreservedLiterally_Success(t *testing.T)
 }
 
 // Expectation: A named group whose key contains dots should be preserved as a literal key.
-func Test_addResolvedAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T) {
+func Test_resolveAndAddAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T) {
 	t.Parallel()
 
 	_, handler := NewLogger("http://fake", WithNoFlush())
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("x.y", slog.String("k", "v")))
+	handler.resolveAndAddAttr(dst, nil, slog.Group("x.y", slog.String("k", "v")))
 
 	g, ok := dst["x.y"].(map[string]any)
 	require.True(t, ok, "dotted group key should be a literal map key")
@@ -1733,7 +1895,7 @@ func Test_addResolvedAttr_DottedGroupKey_PreservedLiterally_Success(t *testing.T
 }
 
 // Expectation: ReplaceAttr dropping an attr inside a named group should exclude it.
-func Test_addResolvedAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
+func Test_resolveAndAddAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
 	t.Parallel()
 
 	opts := &slog.HandlerOptions{
@@ -1750,7 +1912,7 @@ func Test_addResolvedAttr_ReplaceAttrDropsInsideGroup_Success(t *testing.T) {
 	defer handler.Close()
 
 	dst := make(map[string]any)
-	handler.addResolvedAttr(dst, nil, slog.Group("g",
+	handler.resolveAndAddAttr(dst, nil, slog.Group("g",
 		slog.String("keep", "yes"),
 		slog.String("drop", "no"),
 	))

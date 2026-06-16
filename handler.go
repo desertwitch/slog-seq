@@ -2,8 +2,11 @@ package slogseq
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -138,8 +141,44 @@ func (h *SeqHandler) start() {
 		h.workers[i].eventsCh = make(chan CLEFEvent, h.bufferSize)
 
 		h.workerWg.Add(1)
-		go h.runBackgroundFlusher(&h.workers[i])
+		go h.runFlusher(&h.workers[i])
 	}
+}
+
+// Ping checks whether the Seq server is reachable and in service by calling
+// its /health endpoint. Uses the handler's configured HTTP client.
+//
+// Intended for startup checks before setting a constructed handler as default.
+func (h *SeqHandler) Ping() error {
+	u, err := url.Parse(h.seqURL)
+	if err != nil {
+		return fmt.Errorf("seq URL: %w", err)
+	}
+	u.Path = "/health"
+	u.RawQuery = ""
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil) //nolint:noctx
+	if err != nil {
+		return fmt.Errorf("health request: %w", err)
+	}
+	if h.apiKey != "" {
+		req.Header.Set("X-Seq-ApiKey", h.apiKey) //nolint:canonicalheader
+	}
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("health check: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health check: status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // Enabled reports whether the handler is configured to log at the given level.
@@ -151,17 +190,9 @@ func (h *SeqHandler) Enabled(_ context.Context, l slog.Level) bool {
 	return true
 }
 
-// SourceKey returns the key used for source location information when AddSource
-// is enabled in the handler options.
-func (h *SeqHandler) SourceKey() string {
-	return h.sourceKey
-}
-
 // Handle processes a log record, converting it to a CLEF event and dispatching
 // it to a worker for asynchronous delivery to Seq.
 func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
-	levelString := convertLevel(r.Level)
-
 	props := make(map[string]any, r.NumAttrs()+2) //nolint:mnd
 
 	// Process handler (non-record) attrs from WithAttrs calls. Each entry
@@ -171,7 +202,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		dst := nestInto(props, ha.groups)
 
 		for _, a := range ha.attrs {
-			h.addResolvedAttr(dst, ha.groups, a)
+			h.resolveAndAddAttr(dst, ha.groups, a)
 		}
 	}
 
@@ -180,7 +211,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		recordDst := nestInto(props, h.handlerGroups)
 
 		r.Attrs(func(a slog.Attr) bool {
-			h.addResolvedAttr(recordDst, h.handlerGroups, a)
+			h.resolveAndAddAttr(recordDst, h.handlerGroups, a)
 
 			return true
 		})
@@ -191,7 +222,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 			frame, _ := caller.Next()
 			source := slog.Source{File: frame.File, Line: frame.Line, Function: frame.Function}
 
-			h.addResolvedAttr(recordDst, h.handlerGroups, slog.Any(h.sourceKey, &source))
+			h.resolveAndAddAttr(recordDst, h.handlerGroups, slog.Any(h.sourceKey, &source))
 		}
 	}
 
@@ -207,7 +238,7 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 		Timestamp:  r.Time,
 		Message:    msg,
 		Exception:  exception,
-		Level:      levelString,
+		Level:      convertLevel(r.Level),
 		Properties: props,
 	}
 
@@ -327,7 +358,7 @@ func (h *SeqHandler) Events(workerIndex int) <-chan CLEFEvent {
 	return h.workers[workerIndex].eventsCh
 }
 
-func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog.Attr) {
+func (h *SeqHandler) resolveAndAddAttr(dst map[string]any, groups []string, a slog.Attr) {
 	a, ok := h.resolveAttr(groups, a)
 	if !ok {
 		return
@@ -337,7 +368,7 @@ func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog
 		if a.Value.Kind() == slog.KindGroup {
 			// Anonymous group, inline
 			for _, ga := range a.Value.Group() {
-				h.addResolvedAttr(dst, groups, ga)
+				h.resolveAndAddAttr(dst, groups, ga)
 			}
 		}
 
@@ -356,7 +387,7 @@ func (h *SeqHandler) addResolvedAttr(dst map[string]any, groups []string, a slog
 
 		childGroups := append(groups, a.Key) //nolint:gocritic
 		for _, ga := range a.Value.Group() {
-			h.addResolvedAttr(groupMap, childGroups, ga)
+			h.resolveAndAddAttr(groupMap, childGroups, ga)
 		}
 
 		return
@@ -408,18 +439,18 @@ func nestInto(dst map[string]any, groups []string) map[string]any {
 func convertLevel(l slog.Level) string {
 	switch l {
 	case slog.LevelDebug:
-		return CLEFLevelDebug.String()
+		return CLEFLevelDebug
 
 	case slog.LevelInfo:
-		return CLEFLevelInformation.String()
+		return CLEFLevelInformation
 
 	case slog.LevelWarn:
-		return CLEFLevelWarning.String()
+		return CLEFLevelWarning
 
 	case slog.LevelError:
-		return CLEFLevelError.String()
+		return CLEFLevelError
 
 	default:
-		return CLEFLevelInformation.String()
+		return CLEFLevelInformation
 	}
 }

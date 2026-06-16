@@ -9,6 +9,17 @@ Recording of changes began after release version 0.6.0.
 For earlier changes, please refer instead to the Git commit log.
 
 
+## v0.8.0 - 2026-06-16
+### Added
+* Added `SeqHandler.Ping()` ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+### Changed
+* `CLEFLevel` type replaced with string-type `CLEFLevel*` consts ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+### Removed
+* `SeqHandler.SourceKey()` was removed from the API ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+### Fixed
+* Do not allow single event to poison batch on status code 400 ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+* Do not allow single event to poison batch on JSON encode failure ([#13](https://github.com/desertwitch/slog-seq/pull/13))
+
 ## v0.7.0 - 2026-06-16
 ### Added
 * Slog spec-compliance tests ([#1](https://github.com/desertwitch/slog-seq/pull/1))

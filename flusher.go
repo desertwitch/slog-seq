@@ -1,6 +1,7 @@
 package slogseq
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -42,7 +43,7 @@ func newHTTPClient(skipVerify bool) *http.Client {
 	}
 }
 
-func (h *SeqHandler) runBackgroundFlusher(w *worker) {
+func (h *SeqHandler) runFlusher(w *worker) {
 	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
 		return
@@ -61,29 +62,29 @@ func (h *SeqHandler) runBackgroundFlusher(w *worker) {
 		select {
 		case e, ok := <-w.eventsCh:
 			if !ok {
-				h.flushCurrentBatch(w, &events)
+				h.flushBatch(w, &events)
 
 				return
 			}
 			events = append(events, e)
 			if len(events) >= h.batchSize {
-				h.flushCurrentBatch(w, &events)
+				h.flushBatch(w, &events)
 			}
 
 		case <-tickerChan:
-			h.flushCurrentBatch(w, &events)
+			h.flushBatch(w, &events)
 		}
 	}
 }
 
-func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
+func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	if len(w.retryBuffer) > 0 {
-		leftover := h.sendWithRetry(w.retryBuffer)
+		leftover := h.sendEvents(w.retryBuffer)
 		w.retryBuffer = leftover
 	}
 
 	if len(*events) > 0 {
-		leftover := h.sendWithRetry(*events)
+		leftover := h.sendEvents(*events)
 		if leftover != nil {
 			w.retryBuffer = append(w.retryBuffer, leftover...)
 		}
@@ -98,12 +99,74 @@ func (h *SeqHandler) flushCurrentBatch(w *worker, events *[]CLEFEvent) {
 	}
 }
 
-func (h *SeqHandler) sendWithRetry(events []CLEFEvent) []CLEFEvent {
+func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
 		return nil
 	}
 
-	return h.attemptSendBatch(events)
+	var sb strings.Builder
+	var tmp bytes.Buffer
+	enc := json.NewEncoder(&tmp)
+	for _, e := range events {
+		tmp.Reset()
+		clef := encodeEvent(e)
+		if err := enc.Encode(clef); err != nil {
+			h.errorHandlerFunc(fmt.Errorf("dropping unencodable event: %w", err))
+
+			continue
+		}
+		sb.Write(tmp.Bytes())
+	}
+	if sb.Len() == 0 {
+		return nil
+	}
+
+	req, err := http.NewRequest(http.MethodPost, h.seqURL, strings.NewReader(sb.String())) //nolint:noctx
+	if err != nil {
+		h.errorHandlerFunc(err)
+
+		return events
+	}
+	req.Header.Set("Content-Type", "application/vnd.serilog.clef")
+	if h.apiKey != "" {
+		req.Header.Set("X-Seq-ApiKey", h.apiKey) //nolint:canonicalheader
+	}
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.errorHandlerFunc(err)
+
+		return events
+	}
+	defer func() {
+		// Drain the body to allow re-use of TCP connection.
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	// Both of these can poison the whole batch, so we split the batch until they're a single event.
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge {
+		if len(events) == 1 {
+			h.errorHandlerFunc(errors.New("dropping single event; size exceeds Seq server limit"))
+
+			return nil // dropped, not retryable
+		}
+
+		// Split batch in half and retry via recursion
+		mid := len(events) / 2 //nolint:mnd
+		leftover := h.sendEvents(events[:mid])
+		rightover := h.sendEvents(events[mid:])
+
+		return append(leftover, rightover...)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		h.errorHandlerFunc(fmt.Errorf("seq server returned status code %d", resp.StatusCode))
+
+		return events
+	}
+
+	return nil
 }
 
 func encodeEvent(e CLEFEvent) map[string]any {
@@ -138,67 +201,6 @@ func encodeEvent(e CLEFEvent) map[string]any {
 	}
 
 	return topLevel
-}
-
-func (h *SeqHandler) attemptSendBatch(events []CLEFEvent) []CLEFEvent {
-	if len(events) == 0 {
-		return nil
-	}
-
-	var sb strings.Builder
-	enc := json.NewEncoder(&sb)
-	for _, e := range events {
-		topLevel := encodeEvent(e)
-		if err := enc.Encode(topLevel); err != nil {
-			return events
-		}
-	}
-
-	req, err := http.NewRequest(http.MethodPost, h.seqURL, strings.NewReader(sb.String())) //nolint:noctx
-	if err != nil {
-		h.errorHandlerFunc(err)
-
-		return events
-	}
-	req.Header.Set("Content-Type", "application/vnd.serilog.clef")
-	if h.apiKey != "" {
-		req.Header.Set("X-Seq-ApiKey", h.apiKey) //nolint:canonicalheader
-	}
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		h.errorHandlerFunc(err)
-
-		return events
-	}
-	defer func() {
-		// Drain the body to allow re-use of TCP connection.
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode == http.StatusRequestEntityTooLarge {
-		if len(events) == 1 {
-			h.errorHandlerFunc(errors.New("dropping single event; size exceeds Seq server limit"))
-
-			return nil // dropped, not retryable
-		}
-
-		// Split batch in half and retry via recursion
-		mid := len(events) / 2 //nolint:mnd
-		leftover := h.attemptSendBatch(events[:mid])
-		rightover := h.attemptSendBatch(events[mid:])
-
-		return append(leftover, rightover...)
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		h.errorHandlerFunc(fmt.Errorf("seq server returned status code %d", resp.StatusCode))
-
-		return events
-	}
-
-	return nil
 }
 
 // dottedToNested converts a flat map with dotted keys ("a.b.c") into a
