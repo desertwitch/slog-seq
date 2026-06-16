@@ -746,7 +746,7 @@ func Test_flushCurrentBatch_RetryBufferExactlyAtLimit_NoDrop_Success(t *testing.
 			client: GetHTTPClientMock(500, "error", func() {}),
 			seqURL: "http://example.com",
 			errorHandlerFunc: func(err error) {
-				if strings.Contains(err.Error(), "dropped") {
+				if strings.Contains(err.Error(), "dropping") {
 					dropCalled = true
 				}
 			},
