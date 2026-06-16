@@ -15,6 +15,7 @@ For earlier changes, please refer instead to the Git commit log.
 * `NewLoggingSpanProcessor` as new primary entry-point to establish `trace.SpanProcessor` ([#9](https://github.com/desertwitch/slog-seq/pull/9))
 ### Changed
 * Split OTel integration into separate `slog-seq/seqotel` package ([#9](https://github.com/desertwitch/slog-seq/pull/9))
+* `Handler` field on `LoggingSpanProcessor` is no longer exported ([#11](https://github.com/desertwitch/slog-seq/pull/11))
 ### Fixed
 * Unchecked type assertion panic in OTel exception.message ([#1](https://github.com/desertwitch/slog-seq/pull/1))
 * OTel spans and events defaulting to empty level ([#5](https://github.com/desertwitch/slog-seq/pull/5))
