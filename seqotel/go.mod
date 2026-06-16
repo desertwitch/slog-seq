@@ -10,6 +10,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0
 )
 
+replace github.com/desertwitch/slog-seq => ..
+
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
