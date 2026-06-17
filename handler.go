@@ -257,8 +257,8 @@ func (h *SeqHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 // HandleCLEFEvent dispatches a pre-built CLEF event to a worker for
-// asynchronous delivery to Seq. This can be used by span processors or
-// custom integrations that bypass slog.
+// asynchronous delivery to Seq. The caller must not mutate the event
+// or its contents after calling this method.
 func (h *SeqHandler) HandleCLEFEvent(event CLEFEvent) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
