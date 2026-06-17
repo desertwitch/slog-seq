@@ -130,6 +130,9 @@ func (p *LoggingSpanProcessor) ExportSpans(_ context.Context, spans []trace.Read
 	return nil
 }
 
+// logOTelSpanAsCLEF converts a completed OTel span into a CLEF event and
+// dispatches it to Seq. Sets the level to Error if the span status indicates a
+// failure.
 func (p *LoggingSpanProcessor) logOTelSpanAsCLEF(span trace.ReadOnlySpan) {
 	sc := span.SpanContext()
 	if !sc.IsValid() {
@@ -171,6 +174,9 @@ func (p *LoggingSpanProcessor) logOTelSpanAsCLEF(span trace.ReadOnlySpan) {
 	p.handler.HandleCLEFEvent(*event)
 }
 
+// logOTelEventAsCLEF converts a single OTel span event into a CLEF event and
+// dispatches it to Seq. Exception events are promoted to Error level with the
+// stack trace placed in the [slogseq.CLEFEvent.Exception] field.
 func (p *LoggingSpanProcessor) logOTelEventAsCLEF(span trace.ReadOnlySpan, e trace.Event) {
 	sc := span.SpanContext()
 	if !sc.IsValid() {
@@ -211,8 +217,8 @@ func (p *LoggingSpanProcessor) logOTelEventAsCLEF(span trace.ReadOnlySpan, e tra
 }
 
 // resourceAttrs flattens the span's OTel Resource into a map suitable for
-// CLEF's @ra field. Returns nil when the resource is empty so the field is
-// omitted from the JSON output.
+// Seq-extended CLEF's @ra field. Returns nil when the resource is empty so the
+// field is omitted from the JSON output.
 func resourceAttrs(span trace.ReadOnlySpan) map[string]any {
 	res := span.Resource()
 	if res == nil || res.Len() == 0 {
