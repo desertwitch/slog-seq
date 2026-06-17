@@ -1,16 +1,12 @@
 package slogseq
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 )
@@ -24,6 +20,9 @@ const (
 	requestTimeout        = 30 * time.Second
 )
 
+// newHTTPClient creates an [http.Client] with connection pooling and timeouts
+// suitable for batched log delivery. If skipVerify is true, TLS certificate
+// validation is disabled.
 func newHTTPClient(skipVerify bool) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
@@ -43,6 +42,9 @@ func newHTTPClient(skipVerify bool) *http.Client {
 	}
 }
 
+// runFlusher is the per-worker loop that collects events from the channel and
+// flushes them in batches, either when the batch is full or on a timer tick. On
+// channel close it performs a final flush before exiting.
 func (h *SeqHandler) runFlusher(w *worker) {
 	defer h.workerWg.Done()
 	if h.noFlush { // Used in tests
@@ -61,7 +63,7 @@ func (h *SeqHandler) runFlusher(w *worker) {
 	for {
 		select {
 		case e, ok := <-w.eventsCh:
-			if !ok {
+			if !ok { // Channel closed.
 				h.flushBatch(w, &events)
 
 				return
@@ -77,6 +79,9 @@ func (h *SeqHandler) runFlusher(w *worker) {
 	}
 }
 
+// flushBatch first retries any previously failed events, then sends the current
+// batch. Leftover events from either are kept in the retry buffer, which is
+// trimmed to retryBufferSize by dropping the oldest events.
 func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	if len(w.retryBuffer) > 0 {
 		leftover := h.sendEvents(w.retryBuffer)
@@ -99,23 +104,22 @@ func (h *SeqHandler) flushBatch(w *worker, events *[]CLEFEvent) {
 	}
 }
 
+// sendEvents encodes the events as newline-delimited CLEF JSON and POSTs them
+// to Seq. On 400 or 413 it binary-splits the batch to isolate the offending
+// event. Returns any events that should be retried, or nil on success.
 func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	if len(events) == 0 {
 		return nil
 	}
 
 	var sb strings.Builder
-	var tmp bytes.Buffer
-	enc := json.NewEncoder(&tmp)
+	enc := json.NewEncoder(&sb)
 	for _, e := range events {
-		tmp.Reset()
-		clef := encodeEvent(e)
-		if err := enc.Encode(clef); err != nil {
+		if err := enc.Encode(e); err != nil {
 			h.errorHandlerFunc(fmt.Errorf("dropping unencodable event: %w", err))
 
 			continue
 		}
-		sb.Write(tmp.Bytes())
 	}
 	if sb.Len() == 0 {
 		return nil
@@ -123,7 +127,7 @@ func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 
 	req, err := http.NewRequest(http.MethodPost, h.seqURL, strings.NewReader(sb.String())) //nolint:noctx
 	if err != nil {
-		h.errorHandlerFunc(err)
+		h.errorHandlerFunc(fmt.Errorf("http request: %w", err))
 
 		return events
 	}
@@ -134,7 +138,7 @@ func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		h.errorHandlerFunc(err)
+		h.errorHandlerFunc(fmt.Errorf("http request: %w", err))
 
 		return events
 	}
@@ -147,12 +151,12 @@ func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	// Both of these can poison the whole batch, so we split the batch until they're a single event.
 	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusRequestEntityTooLarge {
 		if len(events) == 1 {
-			h.errorHandlerFunc(errors.New("dropping single event; size exceeds Seq server limit"))
+			h.errorHandlerFunc(fmt.Errorf("dropping oversized event; status code %d", resp.StatusCode))
 
 			return nil // dropped, not retryable
 		}
 
-		// Split batch in half and retry via recursion
+		// Split batch in half and retry via recursion:
 		mid := len(events) / 2 //nolint:mnd
 		leftover := h.sendEvents(events[:mid])
 		rightover := h.sendEvents(events[mid:])
@@ -161,84 +165,10 @@ func (h *SeqHandler) sendEvents(events []CLEFEvent) []CLEFEvent {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		h.errorHandlerFunc(fmt.Errorf("seq server returned status code %d", resp.StatusCode))
+		h.errorHandlerFunc(fmt.Errorf("http request: status code %d", resp.StatusCode))
 
 		return events
 	}
 
 	return nil
-}
-
-func encodeEvent(e CLEFEvent) map[string]any {
-	topLevel := make(map[string]any, len(e.Properties)+10) //nolint:mnd
-	maps.Copy(topLevel, e.Properties)
-
-	// Set reserved CLEF keys after copying properties to ensure they aren't overwritten
-	topLevel["@t"] = e.Timestamp.Format(time.RFC3339Nano)
-	topLevel["@m"] = e.Message
-	topLevel["@l"] = e.Level
-
-	if e.Exception != "" {
-		topLevel["@x"] = e.Exception
-	}
-	if !e.SpanStart.IsZero() {
-		topLevel["@st"] = e.SpanStart.Format(time.RFC3339Nano)
-	}
-	if e.TraceID != "" {
-		topLevel["@tr"] = e.TraceID
-	}
-	if e.SpanID != "" {
-		topLevel["@sp"] = e.SpanID
-	}
-	if e.ParentSpanID != "" {
-		topLevel["@ps"] = e.ParentSpanID
-	}
-	if len(e.ResourceAttributes) > 0 {
-		topLevel["@ra"] = dottedToNested(e.ResourceAttributes)
-	}
-	if e.SpanKind != "" {
-		topLevel["@sk"] = e.SpanKind
-	}
-
-	return topLevel
-}
-
-// dottedToNested converts a flat map with dotted keys ("a.b.c") into a
-// nested map structure. Used for ResourceAttributes encoding.
-func dottedToNested(props map[string]any) map[string]any {
-	out := make(map[string]any, len(props))
-
-	keys := make([]string, 0, len(props))
-	for k := range props {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		path := strings.Split(k, ".")
-		addNested(out, path, props[k])
-	}
-
-	return out
-}
-
-func addNested(dst map[string]any, path []string, val any) {
-	if len(path) == 0 {
-		return
-	}
-
-	if len(path) == 1 {
-		dst[path[0]] = val
-
-		return
-	}
-
-	head := path[0]
-	child, ok := dst[head].(map[string]any)
-	if !ok {
-		child = make(map[string]any)
-		dst[head] = child
-	}
-
-	addNested(child, path[1:], val)
 }

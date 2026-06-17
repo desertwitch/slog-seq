@@ -76,7 +76,7 @@ opts := &slog.HandlerOptions{
 		if a.Key == slog.SourceKey {
 			// Replace the full path with just the file name
 			s := a.Value.Any().(*slog.Source)
-			s.File = path.Base(s.File)
+			s.File = filepath.Base(s.File)
 		}
 		return a
 	},
@@ -111,6 +111,9 @@ The `seqotel` sub-package provides [OpenTelemetry](https://opentelemetry.io/) tr
 import (
 	slogseq "github.com/desertwitch/slog-seq"
 	"github.com/desertwitch/slog-seq/seqotel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/trace"
+	tr "go.opentelemetry.io/otel/trace"
 )
 
 handler := seqotel.NewSeqOTelHandler("http://your-seq-server/ingest/clef",

@@ -26,8 +26,9 @@ const (
 
 var _ slog.Handler = (*SeqHandler)(nil)
 
+// shared holds the state and configuration shared across all derived handlers.
 type shared struct {
-	// config (immutable after start, but no reason to copy)
+	// config (immutable after start)
 	seqURL           string
 	apiKey           string
 	batchSize        int
@@ -48,6 +49,7 @@ type shared struct {
 	workers  []worker
 	workerWg sync.WaitGroup
 
+	// shutdown
 	mu        sync.RWMutex
 	closed    bool // through mu
 	closeCh   chan struct{}
@@ -57,6 +59,7 @@ type shared struct {
 	errorHandlerFunc func(error)
 }
 
+// worker holds the event channel and retry buffer for a single flusher goroutine.
 type worker struct {
 	eventsCh    chan CLEFEvent
 	retryBuffer []CLEFEvent
@@ -126,6 +129,8 @@ func NewSeqHandler(seqURL string, opts ...SeqOption) *SeqHandler {
 	return handler
 }
 
+// start initializes the HTTP client (if not provided via options), sets the
+// default error handler, and launches a flusher goroutine for each worker.
 func (h *SeqHandler) start() {
 	if h.client == nil {
 		h.client = newHTTPClient(h.disableTLSVerify)
@@ -328,6 +333,8 @@ func (h *SeqHandler) WithGroup(name string) slog.Handler {
 // will silently drop events. Note that this method will immediately render
 // all derived handlers (WithGroup/WithAttrs) unusable as well, so should only
 // be called once - usually on the shallowest handler on program teardown.
+//
+// May block while pending events are flushed and HTTP requests complete.
 func (h *SeqHandler) Close() error {
 	h.closeOnce.Do(func() {
 		// Blocked senders hold read locks, so we release these first.
@@ -358,6 +365,10 @@ func (h *SeqHandler) Events(workerIndex int) <-chan CLEFEvent {
 	return h.workers[workerIndex].eventsCh
 }
 
+// resolveAndAddAttr resolves a single attribute and inserts it into dst.
+// Anonymous groups are inlined, named groups are nested into sub-maps, and
+// regular values are set directly. Attributes rejected by resolveAttr (e.g.
+// removed by ReplaceAttr) are silently dropped.
 func (h *SeqHandler) resolveAndAddAttr(dst map[string]any, groups []string, a slog.Attr) {
 	a, ok := h.resolveAttr(groups, a)
 	if !ok {
@@ -436,6 +447,8 @@ func nestInto(dst map[string]any, groups []string) map[string]any {
 	return dst
 }
 
+// convertLevel maps slog levels to CLEF level strings.
+// Unrecognized levels default to [CLEFLevelInformation].
 func convertLevel(l slog.Level) string {
 	switch l {
 	case slog.LevelDebug:
