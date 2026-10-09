@@ -24,7 +24,10 @@ const (
 	defaultDisableFlushing = false
 )
 
-var _ slog.Handler = (*SeqHandler)(nil)
+var (
+	_ slog.Handler = (*SeqHandler)(nil)
+	_ io.Closer    = (*SeqHandler)(nil)
+)
 
 // shared holds the state and configuration shared across all derived handlers.
 type shared struct {

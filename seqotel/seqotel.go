@@ -20,6 +20,7 @@ package seqotel
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 
 	slogseq "github.com/desertwitch/slog-seq"
@@ -29,6 +30,8 @@ import (
 )
 
 var (
+	_ slog.Handler        = (*SeqOTelHandler)(nil)
+	_ io.Closer           = (*SeqOTelHandler)(nil)
 	_ trace.SpanProcessor = (*LoggingSpanProcessor)(nil)
 	_ trace.SpanExporter  = (*LoggingSpanProcessor)(nil)
 )
